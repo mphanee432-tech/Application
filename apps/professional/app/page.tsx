@@ -41,6 +41,10 @@ import {
   LifeBuoy,
   FileCheck,
   Wallet,
+  Settings,
+  Calendar,
+  MessageSquare,
+  History,
 } from "lucide-react";
 
 export default function ProfessionalPortal() {
@@ -71,12 +75,22 @@ export default function ProfessionalPortal() {
       setUser(currentUser);
 
       if (currentUser) {
-        const proData = await fetchCurrentProfessional(supabase);
+        const proResponse = await fetchCurrentProfessional(supabase);
+        if (!proResponse.success) {
+          console.error("Failed to load professional data:", proResponse.error);
+          setFeedbackMessage(proResponse.error || "Failed to load professional data.");
+          setProRecord(null);
+          setAvailableJobs([]);
+          setActiveJob(null);
+          return;
+        }
+
+        const proData = proResponse.data;
         setProRecord(proData);
 
         const [jobs, active] = await Promise.all([
-          fetchAvailableJobs(supabase),
-          fetchActiveJobForPro(supabase),
+          fetchAvailableJobs(proData?.id),
+          fetchActiveJobForPro(),
         ]);
         setAvailableJobs(jobs);
         setActiveJob(active);
@@ -85,8 +99,9 @@ export default function ProfessionalPortal() {
         setAvailableJobs([]);
         setActiveJob(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error loading professional data:", err);
+      setFeedbackMessage(err?.message || "Failed to load professional profile.");
     } finally {
       setLoading(false);
     }
@@ -222,6 +237,46 @@ export default function ProfessionalPortal() {
                   />
                   <span>{isOnline ? "Online" : "Offline"}</span>
                 </button>
+
+                {/* Settings / Profile Navigation Link */}
+                <Link
+                  href="/settings"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/80 text-xs font-bold text-emerald-300 transition shadow-sm"
+                  title="Edit Operating City & Skills"
+                >
+                  <Settings className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Settings / Profile</span>
+                </Link>
+
+                {/* Schedule & Working Hours */}
+                <Link
+                  href="/schedule"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  title="Working Hours & Calendar"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-blue-400" />
+                  <span className="hidden lg:inline">Schedule</span>
+                </Link>
+
+                {/* Direct Coordination Chat */}
+                <Link
+                  href="/chat"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  title="Active Job Messages"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-sky-400" />
+                  <span className="hidden lg:inline">Chat</span>
+                </Link>
+
+                {/* Job History */}
+                <Link
+                  href="/history"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  title="Completed & Cancelled Jobs"
+                >
+                  <History className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="hidden lg:inline">History</span>
+                </Link>
 
                 {/* Earnings & Wallet Link */}
                 <Link

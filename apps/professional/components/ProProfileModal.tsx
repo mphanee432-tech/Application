@@ -52,7 +52,8 @@ export function ProProfileModal({
 
       setEmail(user.email || "");
 
-      const proData = await fetchCurrentProfessional(supabase);
+      const proRes = await fetchCurrentProfessional(supabase);
+      const proData = proRes.success ? proRes.data : null;
       if (proData) {
         setFullName(proData.profile?.full_name || (user.user_metadata?.full_name ?? ""));
         setMobile(proData.profile?.mobile || proData.profile?.phone || "");

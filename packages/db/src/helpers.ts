@@ -91,21 +91,49 @@ export async function fetchCurrentProfile(
   return data as Tables<"profiles">;
 }
 
+export interface FetchProfessionalResult {
+  success: boolean;
+  data: (Tables<"professionals"> & { profile?: Tables<"profiles"> }) | null;
+  error?: string;
+}
+
 export async function fetchCurrentProfessional(
   customClient?: TypedSupabaseClient
-): Promise<(Tables<"professionals"> & { profile?: Tables<"profiles"> }) | null> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const user = await getCurrentUser(client);
-  if (!user) return null;
+): Promise<FetchProfessionalResult> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: true, data: null };
+    }
 
-  const { data, error } = await client
-    .from("professionals")
-    .select("*, profile:profiles(*)")
-    .eq("id", user.id)
-    .single();
+    const { data, error } = await client
+      .from("professionals")
+      .select("*, profile:profiles(*)")
+      .eq("id", user.id)
+      .maybeSingle();
 
-  if (error && error.code !== "PGRST116") throw error;
-  return data;
+    if (error) {
+      console.error("fetchCurrentProfessional error:", error);
+      return {
+        success: false,
+        data: null,
+        error: error.message || "Failed to load professional data from database.",
+      };
+    }
+
+    return {
+      success: true,
+      data: (data as any) || null,
+    };
+  } catch (err: any) {
+    console.error("fetchCurrentProfessional unexpected error:", err);
+    return {
+      success: false,
+      data: null,
+      error: err?.message || "An unexpected error occurred while loading professional profile.",
+    };
+  }
 }
 
 /**
@@ -168,13 +196,63 @@ export async function fetchCustomerBookings(
  * Core Bookings - Professional Operations
  */
 export async function fetchAvailableJobs(
+  professionalId?: string,
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
   const client = (customClient ?? createBrowserSupabaseClient()) as any;
+
+  if (professionalId) {
+    // Get professional's city_id
+    const { data: pro } = await client
+      .from("professionals")
+      .select("city_id")
+      .eq("id", professionalId)
+      .maybeSingle();
+
+    // Get professional's active skills (service_ids)
+    const { data: skills } = await client
+      .from("professional_skills")
+      .select("service_id")
+      .eq("professional_id", professionalId);
+
+    const serviceIds = (skills || []).map((s: any) => s.service_id);
+
+    if (!pro?.city_id || serviceIds.length === 0) return [];
+
+    const { data, error } = await client
+      .from("bookings")
+      .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
+      .eq("status", "pending")
+      .eq("city_id", pro.city_id)
+      .in("service_id", serviceIds)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
   const { data, error } = await client
     .from("bookings")
-    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email)")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
     .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchActiveJobsForPro(
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const user = await getCurrentUser(client);
+  if (!user) return [];
+
+  const { data, error } = await client
+    .from("bookings")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
+    .eq("professional_id", user.id)
+    .in("status", ["accepted", "en_route", "arrived", "in_progress"])
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -184,21 +262,8 @@ export async function fetchAvailableJobs(
 export async function fetchActiveJobForPro(
   customClient?: TypedSupabaseClient
 ): Promise<any | null> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const user = await getCurrentUser(client);
-  if (!user) return null;
-
-  const { data, error } = await client
-    .from("bookings")
-    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email)")
-    .eq("professional_id", user.id)
-    .in("status", ["accepted", "en_route", "in_progress"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
+  const jobs = await fetchActiveJobsForPro(customClient);
+  return jobs[0] || null;
 }
 
 export async function acceptJob(
@@ -380,12 +445,18 @@ export async function createBookingWithLocation(
     address: string;
     price: number;
     notes?: string;
+    scheduledDate?: string;
+    preferredTime?: string;
   },
   customClient?: TypedSupabaseClient
 ): Promise<Tables<"bookings">> {
   const client = (customClient ?? createBrowserSupabaseClient()) as any;
   const user = await getCurrentUser(client);
   if (!user) throw new Error("Authentication required to create a booking.");
+
+  const formattedNotes = booking.preferredTime
+    ? `${booking.notes ? booking.notes + " • " : ""}Time Slot: ${booking.preferredTime}`
+    : booking.notes || null;
 
   const insertPayload: any = {
     customer_id: user.id,
@@ -399,7 +470,8 @@ export async function createBookingWithLocation(
     lng: booking.longitude,
     address: booking.address,
     price: booking.price,
-    notes: booking.notes || null,
+    notes: formattedNotes,
+    scheduled_date: booking.scheduledDate || null,
   };
 
   const { data, error } = await client
@@ -719,13 +791,15 @@ export async function updateProfessionalProfile(
     return data;
   }
 
-  return fetchCurrentProfessional(client);
+  const proResult = await fetchCurrentProfessional(client);
+  return proResult.data;
 }
 
 export async function fetchCurrentProfessionalProfile(
   customClient?: TypedSupabaseClient
 ): Promise<any> {
-  return fetchCurrentProfessional(customClient);
+  const proResult = await fetchCurrentProfessional(customClient);
+  return proResult.data;
 }
 
 /* ==========================================================================
@@ -1708,4 +1782,277 @@ export async function resolveSosAlertAdmin(
   if (error) throw error;
   return data;
 }
+
+// ── Chat Helpers ──
+export async function fetchChatMessages(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("chat_messages")
+    .select("*, sender:profiles!chat_messages_sender_id_fkey(full_name)")
+    .eq("booking_id", bookingId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function sendChatMessage(
+  bookingId: string,
+  message: string,
+  customClient?: TypedSupabaseClient
+): Promise<any> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const user = await getCurrentUser(client);
+  if (!user) throw new Error("Not authenticated");
+  const { data, error } = await client
+    .from("chat_messages")
+    .insert({ booking_id: bookingId, sender_id: user.id, message })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ── Scheduling / Availability Helpers ──
+export async function fetchProfessionalAvailability(
+  professionalId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("professional_availability")
+    .select("*")
+    .eq("professional_id", professionalId)
+    .order("day_of_week", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function upsertProfessionalAvailability(
+  professionalId: string,
+  slots: Array<{ day_of_week: number; start_time: string; end_time: string; is_active: boolean }>,
+  customClient?: TypedSupabaseClient
+): Promise<void> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  await client.from("professional_availability").delete().eq("professional_id", professionalId);
+  if (slots.length > 0) {
+    const rows = slots.map((s) => ({ ...s, professional_id: professionalId }));
+    const { error } = await client.from("professional_availability").insert(rows);
+    if (error) throw error;
+  }
+}
+
+export async function updateBlockoutDates(
+  professionalId: string,
+  blockoutDates: string[],
+  customClient?: TypedSupabaseClient
+): Promise<void> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { error } = await client
+    .from("professional_availability")
+    .update({ blockout_dates: blockoutDates })
+    .eq("professional_id", professionalId);
+  if (error) throw error;
+}
+
+// ── Cancellation & Rescheduling Helpers ──
+export async function cancelBooking(
+  bookingId: string,
+  reason: string,
+  fee: number = 0,
+  customClient?: TypedSupabaseClient
+): Promise<any> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const user = await getCurrentUser(client);
+  if (!user) throw new Error("Not authenticated");
+  const { data, error } = await client
+    .from("bookings")
+    .update({
+      status: "cancelled",
+      cancellation_reason: reason,
+      cancellation_fee: fee,
+      cancelled_by: user.id,
+    })
+    .eq("id", bookingId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function rescheduleBooking(
+  bookingId: string,
+  newScheduledDate: string,
+  customClient?: TypedSupabaseClient
+): Promise<any> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("bookings")
+    .update({ scheduled_date: newScheduledDate })
+    .eq("id", bookingId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchCancelledBookings(
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("bookings")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, email), services(name), professional:professionals(id, full_name)")
+    .eq("status", "cancelled")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchCompletedBookingsForPro(
+  professionalId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("bookings")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
+    .eq("professional_id", professionalId)
+    .in("status", ["completed", "cancelled"])
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── SLA Escalation Helpers ──
+export async function fetchSlaEscalatedBookings(
+  thresholdMinutes: number = 10,
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("bookings")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, email, mobile), services(name, description, base_price)")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  if (!data) return [];
+
+  const now = Date.now();
+  return data
+    .map((b: any) => {
+      const createdAt = new Date(b.creation_time || b.created_at).getTime();
+      const elapsedMinutes = Math.floor((now - createdAt) / 60000);
+      return { ...b, elapsedMinutes, isBreached: elapsedMinutes >= thresholdMinutes };
+    })
+    .filter((b: any) => b.elapsedMinutes >= Math.max(thresholdMinutes - 5, 0));
+}
+
+export async function forceAssignBookingAdmin(
+  bookingId: string,
+  professionalId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("bookings")
+    .update({
+      professional_id: professionalId,
+      status: "accepted",
+      dispatch_status: "assigned",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", bookingId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ── Professional Skills & City Operations ──
+export async function fetchProfessionalSkills(
+  professionalId: string,
+  customClient?: TypedSupabaseClient
+): Promise<string[]> {
+  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  const { data, error } = await client
+    .from("professional_skills")
+    .select("service_id")
+    .eq("professional_id", professionalId);
+
+  if (error) {
+    console.error("Error fetching professional skills:", error);
+    return [];
+  }
+  return (data || []).map((s: any) => s.service_id);
+}
+
+export async function updateProfessionalCity(
+  professionalId: string,
+  cityId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { error } = await client
+      .from("professionals")
+      .update({ city_id: cityId, updated_at: new Date().toISOString() })
+      .eq("id", professionalId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error updating professional city:", err);
+    return { success: false, error: err?.message || "Failed to update city." };
+  }
+}
+
+export async function updateProfessionalSkills(
+  professionalId: string,
+  serviceIds: string[],
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string; count?: number }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    // 1. Delete all existing skills
+    const { error: deleteError } = await client
+      .from("professional_skills")
+      .delete()
+      .eq("professional_id", professionalId);
+
+    if (deleteError) throw deleteError;
+
+    // 2. Insert new skills
+    if (serviceIds.length > 0) {
+      const rows = serviceIds.map((sid) => ({
+        professional_id: professionalId,
+        service_id: sid,
+      }));
+      const { error: insertError } = await client
+        .from("professional_skills")
+        .insert(rows);
+
+      if (insertError) throw insertError;
+    }
+
+    return { success: true, count: serviceIds.length };
+  } catch (err: any) {
+    console.error("Error updating professional skills:", err);
+    return { success: false, error: err?.message || "Failed to update skills." };
+  }
+}
+
+export async function fetchCitiesAndServices(
+  customClient?: TypedSupabaseClient
+): Promise<{ cities: Tables<"cities">[]; services: Tables<"services">[] }> {
+  const [cities, services] = await Promise.all([
+    fetchActiveCities(customClient),
+    fetchActiveServices(customClient),
+  ]);
+  return { cities, services };
+}
+
 

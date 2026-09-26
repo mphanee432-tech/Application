@@ -340,6 +340,14 @@ export default function AdminPortal() {
           </Link>
 
           <Link
+            href="/cancellations"
+            className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-slate-400 hover:text-rose-400 transition shrink-0"
+          >
+            <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+            <span>Cancellations</span>
+          </Link>
+
+          <Link
             href="/sos"
             className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-rose-400 hover:text-rose-300 transition shrink-0"
           >

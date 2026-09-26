@@ -18,6 +18,7 @@ import { RateProfessionalModal } from "../components/RateProfessionalModal";
 import { AddressBookModal } from "../components/AddressBookModal";
 import { SupportTicketModal } from "../components/SupportTicketModal";
 import { UserProfileModal } from "../components/UserProfileModal";
+import CancelRescheduleModal from "../components/CancelRescheduleModal";
 import {
   MapPin,
   Wrench,
@@ -75,6 +76,8 @@ export default function UserPortal() {
   const [addressText, setAddressText] = useState("742 Evergreen Terrace, Sector 4");
   const [jobNotes, setJobNotes] = useState("");
   const [saveToAddressBook, setSaveToAddressBook] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [preferredTime, setPreferredTime] = useState("morning");
 
   // User session & Booking lifecycle state
   const [user, setUser] = useState<any>(null);
@@ -87,6 +90,7 @@ export default function UserPortal() {
   // Review modal state
   const [reviewBooking, setReviewBooking] = useState<any | null>(null);
   const [reviewedBookingIds, setReviewedBookingIds] = useState<string[]>([]);
+  const [manageBooking, setManageBooking] = useState<any | null>(null);
 
   // Load initial data
   const loadInitialData = async () => {
@@ -260,6 +264,8 @@ export default function UserPortal() {
           address: `${addressText}, ${selectedCity.name}`,
           price: Number(selectedService.base_price),
           notes: jobNotes,
+          scheduledDate: scheduledDate ? new Date(`${scheduledDate}T00:00:00`).toISOString() : undefined,
+          preferredTime: scheduledDate ? preferredTime : undefined,
         },
         supabase
       );
@@ -597,6 +603,36 @@ export default function UserPortal() {
                 </label>
               </div>
 
+              <div className="flex flex-col sm:flex-row gap-4 border-t border-slate-800 pt-4 mt-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Scheduled Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    min={new Date().toISOString().split("T")[0]}
+                    className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Preferred Time
+                  </label>
+                  <select
+                    value={preferredTime}
+                    onChange={(e) => setPreferredTime(e.target.value)}
+                    disabled={!scheduledDate}
+                    className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    <option value="morning">Morning (8am - 12pm)</option>
+                    <option value="afternoon">Afternoon (12pm - 4pm)</option>
+                    <option value="evening">Evening (4pm - 8pm)</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-slate-400 block">Total Estimated Price</span>
@@ -763,6 +799,15 @@ export default function UserPortal() {
                       </span>
                     </button>
                   )}
+
+                  {(activeBooking.status === "pending" || activeBooking.status === "accepted") && (
+                    <button
+                      onClick={() => setManageBooking(activeBooking)}
+                      className="w-full py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-xl text-xs font-semibold transition-all mt-2"
+                    >
+                      Manage Booking
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8 text-xs text-slate-500">
@@ -803,6 +848,14 @@ export default function UserPortal() {
                       <div className="text-right">
                         <span className="font-bold text-emerald-400 text-xs">${Number(b.price).toFixed(2)}</span>
                         <div className="text-[10px] font-mono text-slate-400 uppercase">{b.status}</div>
+                        {(b.status === "pending" || b.status === "accepted") && (
+                          <button
+                            onClick={() => setManageBooking(b)}
+                            className="mt-1 px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] font-medium transition-colors"
+                          >
+                            Manage
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -844,6 +897,16 @@ export default function UserPortal() {
       <SupportTicketModal
         isOpen={showSupportModal}
         onClose={() => setShowSupportModal(false)}
+      />
+
+      <CancelRescheduleModal
+        booking={manageBooking}
+        isOpen={!!manageBooking}
+        onClose={() => setManageBooking(null)}
+        onSuccess={() => {
+          setManageBooking(null);
+          loadInitialData();
+        }}
       />
 
       {/* User Profile & Contact Modal */}

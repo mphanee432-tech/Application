@@ -17,15 +17,12 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import {
-  createBrowserSupabaseClient,
+  approveProfessionalKyc,
   fetchAllCustomersAdmin,
   fetchAllProfessionalsAdmin,
-} from "@repo/db";
-import { approveProfessionalKyc } from "../app/actions";
+} from "../app/actions";
 
 export function DirectoriesView() {
-  const supabase = createBrowserSupabaseClient();
-
   const [dirTab, setDirTab] = useState<"customers" | "professionals">("customers");
   const [customers, setCustomers] = useState<any[]>([]);
   const [professionals, setProfessionals] = useState<any[]>([]);
@@ -39,11 +36,11 @@ export function DirectoriesView() {
     try {
       setLoading(true);
       const [fetchedCustomers, fetchedPros] = await Promise.all([
-        fetchAllCustomersAdmin(supabase),
-        fetchAllProfessionalsAdmin(supabase),
+        fetchAllCustomersAdmin(),
+        fetchAllProfessionalsAdmin(),
       ]);
-      setCustomers(fetchedCustomers);
-      setProfessionals(fetchedPros);
+      setCustomers(fetchedCustomers || []);
+      setProfessionals(fetchedPros || []);
     } catch (err: any) {
       console.error("Error loading directories:", err);
       setMessage({ type: "error", text: err.message || "Failed to load directory." });

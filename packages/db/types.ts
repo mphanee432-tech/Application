@@ -73,7 +73,9 @@ export type Database = {
           cancelled_by: string | null
           city_id: string | null
           created_at: string
+          creation_time: string | null
           customer_id: string
+          dispatch_status: string | null
           id: string
           lat: number | null
           latitude: number | null
@@ -96,7 +98,9 @@ export type Database = {
           cancelled_by?: string | null
           city_id?: string | null
           created_at?: string
+          creation_time?: string | null
           customer_id: string
+          dispatch_status?: string | null
           id?: string
           lat?: number | null
           latitude?: number | null
@@ -119,7 +123,9 @@ export type Database = {
           cancelled_by?: string | null
           city_id?: string | null
           created_at?: string
+          creation_time?: string | null
           customer_id?: string
+          dispatch_status?: string | null
           id?: string
           lat?: number | null
           latitude?: number | null
@@ -319,6 +325,47 @@ export type Database = {
           },
         ]
       }
+      job_addons: {
+        Row: {
+          booking_id: string
+          cost: number
+          created_at: string
+          id: string
+          item_name: string
+          photo_url: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          cost: number
+          created_at?: string
+          id?: string
+          item_name: string
+          photo_url?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          cost?: number
+          created_at?: string
+          id?: string
+          item_name?: string
+          photo_url?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_addons_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       professional_availability: {
         Row: {
           blockout_dates: Json | null
@@ -404,6 +451,7 @@ export type Database = {
           experience_years: number | null
           full_name: string | null
           id: string
+          id_proof_url: string | null
           is_online: boolean
           kyc_document_path: string | null
           kyc_status: string
@@ -424,6 +472,7 @@ export type Database = {
           experience_years?: number | null
           full_name?: string | null
           id: string
+          id_proof_url?: string | null
           is_online?: boolean
           kyc_document_path?: string | null
           kyc_status?: string
@@ -444,6 +493,7 @@ export type Database = {
           experience_years?: number | null
           full_name?: string | null
           id?: string
+          id_proof_url?: string | null
           is_online?: boolean
           kyc_document_path?: string | null
           kyc_status?: string
