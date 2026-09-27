@@ -65,8 +65,8 @@ export default function CancelRescheduleModal({ booking, isOpen, onClose, onSucc
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg">
-        <h2 className="text-xl font-bold mb-4">Manage Booking</h2>
+      <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg text-gray-900">
+        <h2 className="text-xl font-bold mb-4 text-gray-900">Manage Booking</h2>
 
         {error && <div className="text-red-500 mb-4">{error}</div>}
 
@@ -88,23 +88,26 @@ export default function CancelRescheduleModal({ booking, isOpen, onClose, onSucc
         {activeTab === "cancel" ? (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Reason</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Reason</label>
               <select
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full border rounded p-2"
+                className="w-full border border-gray-300 rounded-lg p-2.5 bg-white text-gray-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm font-medium outline-none"
               >
                 {CANCEL_REASONS.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r} className="bg-white text-gray-900">
+                    {r}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Details (optional)</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Details (optional)</label>
               <textarea
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
-                className="w-full border rounded p-2"
+                className="w-full border border-gray-300 rounded-lg p-2.5 bg-white text-gray-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm outline-none"
+                placeholder="Describe reason for cancellation..."
                 rows={3}
               />
             </div>
@@ -131,24 +134,24 @@ export default function CancelRescheduleModal({ booking, isOpen, onClose, onSucc
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">New Date</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">New Date</label>
               <input
                 type="date"
                 value={newDate}
                 onChange={(e) => setNewDate(e.target.value)}
-                className="w-full border rounded p-2"
+                className="w-full border border-gray-300 rounded-lg p-2.5 bg-white text-gray-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm outline-none"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Preferred Time</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Preferred Time</label>
               <select
                 value={newTime}
                 onChange={(e) => setNewTime(e.target.value)}
-                className="w-full border rounded p-2"
+                className="w-full border border-gray-300 rounded-lg p-2.5 bg-white text-gray-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm font-medium outline-none"
               >
-                <option value="morning">Morning (8am - 12pm)</option>
-                <option value="afternoon">Afternoon (12pm - 4pm)</option>
-                <option value="evening">Evening (4pm - 8pm)</option>
+                <option value="morning" className="bg-white text-gray-900">Morning (8am - 12pm)</option>
+                <option value="afternoon" className="bg-white text-gray-900">Afternoon (12pm - 4pm)</option>
+                <option value="evening" className="bg-white text-gray-900">Evening (4pm - 8pm)</option>
               </select>
             </div>
             <div className="flex justify-end space-x-2 pt-2">

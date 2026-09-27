@@ -4,6 +4,8 @@ import {
   createAdminClient,
   fetchAllProfessionalsAdmin as fetchPros,
   fetchAllCustomersAdmin as fetchCusts,
+  sendAdminBroadcast,
+  approvePayoutAdmin as approvePayoutHelper,
 } from "@repo/db";
 import { revalidatePath } from "next/cache";
 
@@ -49,16 +51,28 @@ export async function approveProfessionalKyc(professionalId: string) {
  * Server Action: Fetch all professionals bypassing RLS via admin client
  */
 export async function fetchAllProfessionalsAdmin() {
-  const adminClient = getAdminClient();
-  return fetchPros(adminClient as any);
+  try {
+    const adminClient = getAdminClient();
+    const pros = await fetchPros(adminClient as any);
+    return Array.isArray(pros) ? pros : [];
+  } catch (err: any) {
+    console.error("fetchAllProfessionalsAdmin action error:", err?.message || err);
+    return [];
+  }
 }
 
 /**
  * Server Action: Fetch all customer profiles & bookings bypassing RLS via admin client
  */
 export async function fetchAllCustomersAdmin() {
-  const adminClient = getAdminClient();
-  return fetchCusts(adminClient as any);
+  try {
+    const adminClient = getAdminClient();
+    const custs = await fetchCusts(adminClient as any);
+    return Array.isArray(custs) ? custs : [];
+  } catch (err: any) {
+    console.error("fetchAllCustomersAdmin action error:", err?.message || err);
+    return [];
+  }
 }
 
 /**
@@ -97,3 +111,37 @@ export async function ensureSuperAdminRole(userId: string) {
 
   return { assigned: false, role: userAdmin?.role || "standard" };
 }
+
+/**
+ * Server Action: Send broadcast notification to customers and/or professionals bypassing RLS via admin client
+ */
+export async function sendAdminBroadcastAction(params: {
+  title: string;
+  message: string;
+  targetAudience: "all" | "customers" | "professionals";
+}) {
+  const adminClient = getAdminClient();
+  return sendAdminBroadcast(params, adminClient as any);
+}
+
+/**
+ * Server Action: Approve and clear a professional payout via admin service client
+ */
+export async function approvePayoutAdminAction(transactionId: string) {
+  try {
+    const adminClient = getAdminClient();
+    const result = await approvePayoutHelper(transactionId, adminClient as any);
+    return {
+      success: !!result.success,
+      data: result.data || transactionId,
+      error: result.error || undefined,
+    };
+  } catch (err: any) {
+    console.error("approvePayoutAdminAction error:", err?.message || err);
+    return {
+      success: false,
+      error: err?.message || "Failed to approve payout.",
+    };
+  }
+}
+

@@ -7,6 +7,7 @@ import {
   fetchTicketThread,
   createSupportTicket,
   createTicketReply,
+  markTicketAsRead,
   type Tables,
 } from "@repo/db";
 import {
@@ -70,6 +71,7 @@ export function SupportTicketModal({ isOpen, onClose }: SupportTicketModalProps)
       setError(null);
       const data = await fetchTicketThread(ticketId, supabase);
       setThreadData(data);
+      markTicketAsRead(ticketId, supabase).catch(() => {});
     } catch (err: any) {
       setError(err.message || "Failed to load ticket thread.");
     } finally {

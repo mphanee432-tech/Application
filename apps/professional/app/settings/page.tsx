@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,6 +13,7 @@ import {
   fetchProfessionalSkills,
   updateProfessionalCity,
   updateProfessionalSkills,
+  setProfessionalOnlineStatus,
   type Tables,
 } from "@repo/db";
 import {
@@ -162,15 +165,24 @@ export default function ProfessionalSettingsPage() {
     const newStatus = !isOnline;
     setIsOnline(newStatus);
     try {
-      await (supabase.from("professionals") as any)
-        .update({ is_online: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", user.id);
+      const res = await setProfessionalOnlineStatus(user.id, newStatus, supabase);
+      if (!res.success) {
+        setIsOnline(!newStatus);
+      }
     } catch (err) {
       console.error("Failed to toggle online status:", err);
+      setIsOnline(!newStatus);
     }
   };
 
   const handleSignOut = async () => {
+    if (user) {
+      try {
+        await setProfessionalOnlineStatus(user.id, false, supabase);
+      } catch (err) {
+        console.error("Failed setting offline on logout:", err);
+      }
+    }
     await supabase.auth.signOut();
     router.push("/login");
   };

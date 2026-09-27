@@ -199,26 +199,49 @@ export async function fetchAvailableJobs(
   professionalId?: string,
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    let proId = professionalId;
+    if (!proId) {
+      const user = await getCurrentUser(client);
+      if (user) proId = user.id;
+    }
 
-  if (professionalId) {
-    // Get professional's city_id
-    const { data: pro } = await client
+    if (!proId) return [];
+
+    // 1. Fetch professional's profile to verify is_online and kyc_status
+    const { data: pro, error: proError } = await client
       .from("professionals")
-      .select("city_id")
-      .eq("id", professionalId)
+      .select("id, city_id, is_online, kyc_status, status")
+      .eq("id", proId)
       .maybeSingle();
 
-    // Get professional's active skills (service_ids)
-    const { data: skills } = await client
+    if (proError || !pro) {
+      console.error("fetchAvailableJobs pro query error:", proError);
+      return [];
+    }
+
+    // STRICT CHECK: ONLY return data if requesting professional is is_online = true AND kyc_status = 'approved' (or status = 'approved')
+    const isApproved = pro.kyc_status === "approved" || pro.status === "approved";
+    if (pro.is_online !== true || !isApproved || !pro.city_id) {
+      return [];
+    }
+
+    // 2. Get professional's active skills (service_ids)
+    const { data: skills, error: skillsError } = await client
       .from("professional_skills")
       .select("service_id")
-      .eq("professional_id", professionalId);
+      .eq("professional_id", proId);
 
-    const serviceIds = (skills || []).map((s: any) => s.service_id);
+    if (skillsError) {
+      console.error("fetchAvailableJobs skills query error:", skillsError);
+      return [];
+    }
 
-    if (!pro?.city_id || serviceIds.length === 0) return [];
+    const serviceIds = (skills || []).map((s: any) => s.service_id).filter(Boolean);
+    if (serviceIds.length === 0) return [];
 
+    // 3. Strictly filter jobs where status = 'pending', city_id matches pro's city_id, and service_id in pro's skills
     const { data, error } = await client
       .from("bookings")
       .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
@@ -227,36 +250,41 @@ export async function fetchAvailableJobs(
       .in("service_id", serviceIds)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error("fetchAvailableJobs query error:", error);
+      return [];
+    }
     return data || [];
+  } catch (err) {
+    console.error("fetchAvailableJobs unexpected exception:", err);
+    return [];
   }
-
-  const { data, error } = await client
-    .from("bookings")
-    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
-    .eq("status", "pending")
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return data || [];
 }
 
 export async function fetchActiveJobsForPro(
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const user = await getCurrentUser(client);
-  if (!user) return [];
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) return [];
 
-  const { data, error } = await client
-    .from("bookings")
-    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
-    .eq("professional_id", user.id)
-    .in("status", ["accepted", "en_route", "arrived", "in_progress"])
-    .order("created_at", { ascending: false });
+    const { data, error } = await client
+      .from("bookings")
+      .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
+      .eq("professional_id", user.id)
+      .in("status", ["accepted", "en_route", "arrived", "in_progress"])
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data || [];
+    if (error) {
+      console.error("fetchActiveJobsForPro error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.error("fetchActiveJobsForPro unexpected exception:", err);
+    return [];
+  }
 }
 
 export async function fetchActiveJobForPro(
@@ -319,7 +347,7 @@ export async function fetchAllBookingsAdmin(
   const client = (customClient ?? createBrowserSupabaseClient()) as any;
   const { data, error } = await client
     .from("bookings")
-    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, email, phone), professional:professionals(id, trade, rating, profile:profiles(full_name))")
+    .select("*, customer:profiles!bookings_customer_id_fkey(full_name, email, phone, mobile), professional:professionals(id, full_name, trade, rating, profile:profiles(full_name, email, phone, mobile))")
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -329,14 +357,22 @@ export async function fetchAllBookingsAdmin(
 export async function fetchAllProfessionalsAdmin(
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const { data, error } = await client
-    .from("professionals")
-    .select("*, profile:profiles!professionals_id_fkey(full_name, email, phone)")
-    .order("created_at", { ascending: false });
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("professionals")
+      .select("*, profile:profiles!professionals_id_fkey(full_name, email, phone)")
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data || [];
+    if (error) {
+      console.error("fetchAllProfessionalsAdmin error:", error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err: any) {
+    console.error("fetchAllProfessionalsAdmin unexpected error:", err?.message);
+    return [];
+  }
 }
 
 export async function bootstrapAdminAccount(
@@ -661,7 +697,7 @@ export async function uploadProofOfWork(
 export async function submitReview(
   payload: {
     bookingId: string;
-    targetId: string;
+    targetId?: string;
     rating: number;
     comment?: string;
   },
@@ -671,12 +707,26 @@ export async function submitReview(
   const user = await getCurrentUser(client);
   if (!user) throw new Error("Authentication required to submit review.");
 
+  let targetId = payload.targetId;
+  if (!targetId) {
+    const { data: booking, error: bErr } = await client
+      .from("bookings")
+      .select("professional_id")
+      .eq("id", payload.bookingId)
+      .maybeSingle();
+
+    if (bErr || !booking?.professional_id) {
+      throw new Error("Unable to identify the professional for this booking.");
+    }
+    targetId = booking.professional_id;
+  }
+
   const { data, error } = await client
     .from("reviews")
     .insert({
       booking_id: payload.bookingId,
       reviewer_id: user.id,
-      target_id: payload.targetId,
+      target_id: targetId,
       rating: payload.rating,
       comment: payload.comment?.trim() || null,
     })
@@ -684,6 +734,31 @@ export async function submitReview(
     .single();
 
   if (error) throw error;
+
+  // Background recalculation of professional rating & total jobs
+  try {
+    const { data: allReviews } = await client
+      .from("reviews")
+      .select("rating")
+      .eq("target_id", targetId);
+
+    if (allReviews && allReviews.length > 0) {
+      const avg =
+        allReviews.reduce((sum: number, r: any) => sum + Number(r.rating || 0), 0) /
+        allReviews.length;
+      await client
+        .from("professionals")
+        .update({
+          rating: Math.round(avg * 10) / 10,
+          total_jobs: allReviews.length,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", targetId);
+    }
+  } catch (calcErr) {
+    console.warn("Could not update professional average rating:", calcErr);
+  }
+
   return data;
 }
 
@@ -1142,23 +1217,31 @@ export async function deleteServiceAdmin(
 export async function fetchAllCustomersAdmin(
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const { data: customerProfiles, error: profileErr } = await client
-    .from("profiles")
-    .select("*, bookings(id, price, status, created_at)")
-    .eq("role", "user")
-    .order("created_at", { ascending: false });
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data: customerProfiles, error: profileErr } = await client
+      .from("profiles")
+      .select("*, bookings(id, price, status, created_at)")
+      .in("role", ["customer", "user"])
+      .order("created_at", { ascending: false });
 
-  if (profileErr) throw profileErr;
+    if (profileErr) {
+      console.error("fetchAllCustomersAdmin error:", profileErr.message);
+      return [];
+    }
 
-  return (customerProfiles || []).map((p: any) => ({
-    ...p,
-    mobile: p.mobile || p.phone,
-    total_bookings: p.bookings ? p.bookings.length : 0,
-    total_spent: p.bookings
-      ? p.bookings.reduce((sum: number, b: any) => sum + (b.status === "completed" ? Number(b.price || 0) : 0), 0)
-      : 0,
-  }));
+    return (customerProfiles || []).map((p: any) => ({
+      ...p,
+      mobile: p.mobile || p.phone,
+      total_bookings: p.bookings ? p.bookings.length : 0,
+      total_spent: p.bookings
+        ? p.bookings.reduce((sum: number, b: any) => sum + (b.status === "completed" ? Number(b.price || 0) : 0), 0)
+        : 0,
+    }));
+  } catch (err: any) {
+    console.error("fetchAllCustomersAdmin unexpected error:", err?.message);
+    return [];
+  }
 }
 
 /* ==========================================================================
@@ -1617,23 +1700,44 @@ export async function requestPayoutPro(
   return transaction;
 }
 
+export interface ApprovePayoutResult {
+  success: boolean;
+  data?: string;
+  error?: string;
+}
+
 export async function approvePayoutAdmin(
   transactionId: string,
   customClient?: TypedSupabaseClient
-): Promise<Tables<"transactions">> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const { data, error } = await client
-    .from("transactions")
-    .update({
-      status: "completed",
-      metadata: { approved_at: new Date().toISOString() },
-    })
-    .eq("id", transactionId)
-    .select()
-    .single();
+): Promise<ApprovePayoutResult> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("transactions")
+      .update({
+        status: "completed",
+        metadata: { approved_at: new Date().toISOString() },
+      })
+      .eq("id", transactionId)
+      .select("id");
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      console.error("approvePayoutAdmin error:", error.message);
+      return { success: false, error: error.message || "Failed to approve payout." };
+    }
+
+    if (!data || data.length === 0) {
+      return { success: false, error: "Transaction not found or could not be updated." };
+    }
+
+    return { success: true, data: data[0]?.id || transactionId };
+  } catch (err: any) {
+    console.error("approvePayoutAdmin unexpected error:", err?.message || err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred while approving payout.",
+    };
+  }
 }
 
 export async function fetchPlatformFinanceLedger(
@@ -1673,6 +1777,21 @@ export async function fetchPlatformFinanceLedger(
       if (tx.status === "pending") pendingPayouts += amt;
       else if (tx.status === "completed") completedPayouts += amt;
     }
+  }
+
+  // Dynamically include approved add-ons in total GMV and platform commission
+  const { data: approvedAddons } = await client
+    .from("job_addons")
+    .select("cost")
+    .eq("status", "approved");
+
+  if (approvedAddons && approvedAddons.length > 0) {
+    const addonsTotal = approvedAddons.reduce(
+      (acc: number, a: any) => acc + Number(a.cost || 0),
+      0
+    );
+    totalVolume += addonsTotal;
+    platformCommissions += addonsTotal * 0.2; // 20% platform commission
   }
 
   return {
@@ -1741,20 +1860,28 @@ export async function fetchUserSosAlerts(
 
 export async function fetchActiveSosAlertsAdmin(
   customClient?: TypedSupabaseClient
-): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const { data, error } = await client
-    .from("sos_alerts")
-    .select(`
-      *,
-      creator:profiles!sos_alerts_creator_id_fkey(id, full_name, email, phone, mobile, role),
-      booking:bookings!sos_alerts_booking_id_fkey(id, service_id, status, scheduled_at, latitude, longitude),
-      resolver:profiles!sos_alerts_resolved_by_fkey(id, full_name, email)
-    `)
-    .order("created_at", { ascending: false });
+): Promise<{ success: boolean; data?: any[]; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("sos_alerts")
+      .select(`
+        *,
+        creator:profiles!sos_alerts_creator_id_fkey(id, full_name, email, phone, mobile, role),
+        booking:bookings!sos_alerts_booking_id_fkey(id, service_id, status, scheduled_date, latitude, longitude),
+        resolver:profiles!sos_alerts_resolved_by_fkey(id, full_name, email)
+      `)
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data || [];
+    if (error) {
+      console.error("fetchActiveSosAlertsAdmin DB error:", error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    console.error("fetchActiveSosAlertsAdmin unexpected error:", err);
+    return { success: false, error: err?.message || "Failed to fetch SOS alerts" };
+  }
 }
 
 export async function resolveSosAlertAdmin(
@@ -1786,14 +1913,29 @@ export async function resolveSosAlertAdmin(
 // ── Chat Helpers ──
 export async function fetchChatMessages(
   bookingId: string,
+  channelTypeOrClient?: "professional" | "admin" | string | TypedSupabaseClient,
   customClient?: TypedSupabaseClient
 ): Promise<any[]> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const { data, error } = await client
+  let channelType: string | undefined;
+  let client: any;
+
+  if (channelTypeOrClient && typeof channelTypeOrClient === "object" && "from" in channelTypeOrClient) {
+    client = channelTypeOrClient;
+  } else {
+    channelType = typeof channelTypeOrClient === "string" ? channelTypeOrClient : undefined;
+    client = (customClient ?? createBrowserSupabaseClient()) as any;
+  }
+
+  let query = client
     .from("chat_messages")
-    .select("*, sender:profiles!chat_messages_sender_id_fkey(full_name)")
-    .eq("booking_id", bookingId)
-    .order("created_at", { ascending: true });
+    .select("*, sender:profiles!chat_messages_sender_id_fkey(full_name, role)")
+    .eq("booking_id", bookingId);
+
+  if (channelType) {
+    query = query.or(`channel_type.eq.${channelType},channel_type.is.null`);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: true });
   if (error) throw error;
   return data || [];
 }
@@ -1801,16 +1943,43 @@ export async function fetchChatMessages(
 export async function sendChatMessage(
   bookingId: string,
   message: string,
+  optionsOrClient?:
+    | {
+        channelType?: "professional" | "admin" | string;
+        isAdmin?: boolean;
+        participantRole?: "customer" | "professional" | "admin" | string;
+      }
+    | TypedSupabaseClient,
   customClient?: TypedSupabaseClient
 ): Promise<any> {
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
+  let opts: { channelType?: string; isAdmin?: boolean; participantRole?: string } = {};
+  let client: any;
+
+  if (optionsOrClient && typeof optionsOrClient === "object" && "from" in optionsOrClient) {
+    client = optionsOrClient;
+  } else {
+    opts = (optionsOrClient as any) || {};
+    client = (customClient ?? createBrowserSupabaseClient()) as any;
+  }
+
   const user = await getCurrentUser(client);
   if (!user) throw new Error("Not authenticated");
+
+  const insertPayload = {
+    booking_id: bookingId,
+    sender_id: user.id,
+    message,
+    channel_type: opts.channelType || "professional",
+    is_admin: opts.isAdmin ?? false,
+    participant_role: opts.participantRole || "customer",
+  };
+
   const { data, error } = await client
     .from("chat_messages")
-    .insert({ booking_id: bookingId, sender_id: user.id, message })
+    .insert(insertPayload)
     .select()
     .single();
+
   if (error) throw error;
   return data;
 }
@@ -2055,4 +2224,591 @@ export async function fetchCitiesAndServices(
   return { cities, services };
 }
 
+// ── Professional Online Status Toggle ──
+export async function setProfessionalOnlineStatus(
+  isOnlineOrId: boolean | string,
+  isOnlineOrClient?: boolean | TypedSupabaseClient,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    let proId: string | undefined;
+    let isOnline: boolean;
+    let client: any;
+
+    if (typeof isOnlineOrId === "string") {
+      proId = isOnlineOrId;
+      isOnline = typeof isOnlineOrClient === "boolean" ? isOnlineOrClient : true;
+      client = (customClient ?? createBrowserSupabaseClient()) as any;
+    } else {
+      isOnline = isOnlineOrId;
+      client = (isOnlineOrClient && typeof isOnlineOrClient === "object"
+        ? isOnlineOrClient
+        : customClient ?? createBrowserSupabaseClient()) as any;
+      const user = await getCurrentUser(client);
+      if (!user) return { success: false, error: "Authentication required." };
+      proId = user.id;
+    }
+
+    const { error } = await client
+      .from("professionals")
+      .update({ is_online: isOnline, updated_at: new Date().toISOString() })
+      .eq("id", proId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("setProfessionalOnlineStatus error:", err);
+    return { success: false, error: err?.message || "Failed to update online status." };
+  }
+}
+
+export async function fetchBookingReview(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<Tables<"reviews"> | null> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("reviews")
+      .select("*")
+      .eq("booking_id", bookingId)
+      .maybeSingle();
+
+    if (error) return null;
+    return (data as Tables<"reviews">) || null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Booking Auto-Dispatch & Eligible Professionals Matching ──
+export async function findEligibleProfessionalsForBooking(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any[]> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data: booking, error: bErr } = await client
+      .from("bookings")
+      .select("city_id, service_id")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bErr || !booking) return [];
+
+    // Strictly query professionals who are is_online = true
+    let query = client
+      .from("professionals")
+      .select("*, profile:profiles!professionals_id_fkey(full_name, phone, email)")
+      .eq("is_online", true);
+
+    if (booking.city_id) {
+      query = query.eq("city_id", booking.city_id);
+    }
+
+    const { data: pros, error: pErr } = await query;
+    if (pErr || !pros) return [];
+
+    // Filter approved KYC status
+    const approvedPros = pros.filter(
+      (p: any) => p.status === "approved" || p.kyc_status === "approved"
+    );
+
+    // If booking has a service_id, filter by professional's skills if skills exist
+    if (booking.service_id && approvedPros.length > 0) {
+      const proIds = approvedPros.map((p: any) => p.id);
+      const { data: skills } = await client
+        .from("professional_skills")
+        .select("professional_id, service_id")
+        .in("professional_id", proIds)
+        .eq("service_id", booking.service_id);
+
+      if (skills && skills.length > 0) {
+        const skilledProIds = new Set(skills.map((s: any) => s.professional_id));
+        return approvedPros.filter((p: any) => skilledProIds.has(p.id));
+      }
+    }
+
+    return approvedPros;
+  } catch (err) {
+    console.error("findEligibleProfessionalsForBooking error:", err);
+    return [];
+  }
+}
+
+// ── Ongoing Booking Drill-Down Details ──
+export async function fetchBookingDetails(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<any | null> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("bookings")
+      .select(
+        "*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email, mobile), professional:professionals(id, full_name, trade, rating, profile:profiles(full_name, phone, email, mobile)), services(name, description, base_price, icon)"
+      )
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("fetchBookingDetails error:", error);
+      return null;
+    }
+    return data || null;
+  } catch (err) {
+    console.error("fetchBookingDetails unexpected error:", err);
+    return null;
+  }
+}
+
+/* ==========================================================================
+   CENTRALIZED NOTIFICATIONS & BROADCASTS
+   ========================================================================== */
+
+export async function fetchUserNotifications(
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; data?: any[]; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: false, error: "Not authenticated" };
+    }
+
+    const { data, error } = await client
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to fetch notifications" };
+  }
+}
+
+export async function markNotificationAsRead(
+  notificationId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: false, error: "Not authenticated" };
+    }
+
+    const { error } = await client
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", notificationId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to mark notification as read" };
+  }
+}
+
+export async function sendAdminBroadcast(
+  params: {
+    title: string;
+    message: string;
+    targetAudience?: "all" | "customers" | "professionals" | "both";
+    audience?: "all" | "customers" | "professionals" | "both";
+  },
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const audience = (params.audience || params.targetAudience || "all") as string;
+    let targetUserIds: string[] = [];
+
+    if (audience === "professionals") {
+      // Query ONLY the professionals table to get pro IDs
+      const { data: pros, error: proErr } = await client.from("professionals").select("id");
+      if (proErr) throw proErr;
+      targetUserIds = (pros || []).map((p: any) => p.id as string);
+    } else if (audience === "customers") {
+      // Query profiles table for customer IDs, strictly excluding any professional IDs
+      const { data: pros } = await client.from("professionals").select("id");
+      const proIdSet = new Set<string>((pros || []).map((p: any) => p.id as string));
+
+      const { data: profiles, error: profErr } = await client.from("profiles").select("id, role");
+      if (profErr) throw profErr;
+
+      targetUserIds = (profiles || [])
+        .filter((p: any) => !proIdSet.has(p.id) && p.role !== "professional")
+        .map((p: any) => p.id as string);
+    } else {
+      // "all" or "both" - query profiles table to reach all users
+      const { data: profiles, error: profErr } = await client.from("profiles").select("id");
+      if (profErr) throw profErr;
+      targetUserIds = (profiles || []).map((p: any) => p.id as string);
+    }
+
+    // Deduplicate
+    const uniqueIds = Array.from(new Set(targetUserIds));
+    if (uniqueIds.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    const rows = uniqueIds.map((uid) => ({
+      user_id: uid,
+      title: params.title,
+      message: params.message,
+      type: "admin_broadcast",
+      is_read: false,
+    }));
+
+    const { error } = await client.from("notifications").insert(rows);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, count: rows.length };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to broadcast notifications" };
+  }
+}
+
+/* ==========================================================================
+   IN-JOB UPSELL & CROSS-SELL ADD-ONS
+   ========================================================================== */
+
+export async function fetchBookingAddons(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; data?: any[]; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("job_addons")
+      .select("*, service:services(id, name, base_price, icon)")
+      .eq("booking_id", bookingId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("fetchBookingAddons DB error:", error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    const msg = err?.message || String(err) || "fetchBookingAddons failed";
+    console.error("fetchBookingAddons unexpected error:", msg);
+    return { success: false, error: msg };
+  }
+}
+
+export async function createBookingAddon(
+  payload: {
+    bookingId: string;
+    serviceId?: string;
+    itemName?: string;
+    customDescription?: string;
+    cost: number;
+    photoFileOrUrl?: File | Blob | string;
+  },
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: false, error: "Must be authenticated to propose add-on." };
+    }
+
+    let photoUrl: string | null = null;
+    if (typeof payload.photoFileOrUrl === "string") {
+      photoUrl = payload.photoFileOrUrl;
+    } else if (payload.photoFileOrUrl) {
+      const file = payload.photoFileOrUrl as File;
+      const fileExt = file.name ? file.name.split(".").pop() : "jpg";
+      const filePath = `addons/${payload.bookingId}/addon-${Date.now()}.${fileExt}`;
+
+      const { error: upErr } = await client.storage
+        .from("proof-of-work")
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type || "image/jpeg",
+        });
+
+      if (!upErr) {
+        const { data: pubData } = client.storage
+          .from("proof-of-work")
+          .getPublicUrl(filePath);
+        photoUrl = pubData.publicUrl;
+      }
+    }
+
+    const itemName = payload.itemName || payload.customDescription || "Additional Service / Part";
+
+    const { data, error } = await client
+      .from("job_addons")
+      .insert({
+        booking_id: payload.bookingId,
+        service_id: payload.serviceId || null,
+        item_name: itemName,
+        custom_description: payload.customDescription || itemName,
+        cost: Number(payload.cost),
+        photo_url: photoUrl,
+        status: "pending",
+      })
+      .select("*, service:services(id, name, base_price, icon)")
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to create add-on." };
+  }
+}
+
+export async function updateBookingAddonStatus(
+  addonId: string,
+  status: "approved" | "declined",
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("job_addons")
+      .update({ status })
+      .eq("id", addonId)
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to update add-on status." };
+  }
+}
+
+export async function fetchBookingTotalWithAddons(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{
+  basePrice: number;
+  approvedAddonsTotal: number;
+  totalGMV: number;
+  pendingAddonsCount: number;
+  addons: any[];
+}> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data: booking } = await client
+      .from("bookings")
+      .select("price")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    const addonsResult = await fetchBookingAddons(bookingId, client);
+    const allAddons = addonsResult.success ? (addonsResult.data || []) : [];
+    const basePrice = Number(booking?.price || 0);
+
+    const approvedAddons = allAddons.filter((a: any) => a.status === "approved");
+    const pendingAddons = allAddons.filter((a: any) => a.status === "pending");
+
+    const approvedAddonsTotal = approvedAddons.reduce(
+      (sum: number, a: any) => sum + Number(a.cost || 0),
+      0
+    );
+    const totalGMV = basePrice + approvedAddonsTotal;
+
+    return {
+      basePrice,
+      approvedAddonsTotal,
+      totalGMV,
+      pendingAddonsCount: pendingAddons.length,
+      addons: allAddons,
+    };
+  } catch (err) {
+    console.error("fetchBookingTotalWithAddons error:", err);
+    return {
+      basePrice: 0,
+      approvedAddonsTotal: 0,
+      totalGMV: 0,
+      pendingAddonsCount: 0,
+      addons: [],
+    };
+  }
+}
+
+/* ==========================================================================
+   REALTIME BADGE & UNREAD COUNT HELPERS
+   ========================================================================== */
+
+export async function getUnreadChatCount(
+  userId?: string,
+  customClient?: TypedSupabaseClient
+): Promise<number> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    let uid = userId;
+    if (!uid) {
+      const user = await getCurrentUser(client);
+      if (!user) return 0;
+      uid = user.id;
+    }
+
+    // Find active bookings for this user as either customer or professional
+    const { data: bookings, error: bErr } = await client
+      .from("bookings")
+      .select("id")
+      .or(`customer_id.eq.${uid},professional_id.eq.${uid}`)
+      .in("status", ["pending", "accepted", "en_route", "arrived", "in_progress"]);
+
+    if (bErr || !bookings || bookings.length === 0) return 0;
+
+    const bookingIds = bookings.map((b: any) => b.id);
+    const { count, error } = await client
+      .from("chat_messages")
+      .select("*", { count: "exact", head: true })
+      .in("booking_id", bookingIds)
+      .neq("sender_id", uid)
+      .eq("is_read", false);
+
+    if (error) {
+      console.warn("getUnreadChatCount error:", error.message);
+      return 0;
+    }
+    return count || 0;
+  } catch (err: any) {
+    console.warn("getUnreadChatCount unexpected error:", err?.message);
+    return 0;
+  }
+}
+
+export async function getUnreadSupportCount(
+  userId?: string,
+  role?: string,
+  customClient?: TypedSupabaseClient
+): Promise<number> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    let uid = userId;
+    let userRole = role;
+    if (!uid) {
+      const user = await getCurrentUser(client);
+      if (!user) return 0;
+      uid = user.id;
+      userRole = user.user_metadata?.role || "customer";
+    }
+
+    if (userRole === "admin" || userRole === "super_admin") {
+      // For Admin: Count unread replies sent by non-admins
+      const { count, error } = await client
+        .from("ticket_replies")
+        .select("*", { count: "exact", head: true })
+        .neq("sender_role", "admin")
+        .eq("is_read", false);
+
+      if (error) return 0;
+      return count || 0;
+    }
+
+    // For Customer or Professional: Get user's tickets first
+    const { data: tickets, error: tErr } = await client
+      .from("support_tickets")
+      .select("id")
+      .eq("creator_id", uid);
+
+    if (tErr || !tickets || tickets.length === 0) return 0;
+
+    const ticketIds = tickets.map((t: any) => t.id);
+    const { count, error } = await client
+      .from("ticket_replies")
+      .select("*", { count: "exact", head: true })
+      .in("ticket_id", ticketIds)
+      .neq("sender_id", uid)
+      .eq("is_read", false);
+
+    if (error) return 0;
+    return count || 0;
+  } catch (err: any) {
+    console.warn("getUnreadSupportCount unexpected error:", err?.message);
+    return 0;
+  }
+}
+
+export async function getActiveSosCountAdmin(
+  customClient?: TypedSupabaseClient
+): Promise<number> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { count, error } = await client
+      .from("sos_alerts")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "active");
+
+    if (error) return 0;
+    return count || 0;
+  } catch (err) {
+    return 0;
+  }
+}
+
+export async function markChatAsRead(
+  bookingId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) return { success: false, error: "Not authenticated" };
+
+    const { error } = await client
+      .from("chat_messages")
+      .update({ is_read: true })
+      .eq("booking_id", bookingId)
+      .neq("sender_id", user.id)
+      .eq("is_read", false);
+
+    if (error) {
+      console.warn("markChatAsRead error:", error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed marking chat as read" };
+  }
+}
+
+export async function markTicketAsRead(
+  ticketId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) return { success: false, error: "Not authenticated" };
+
+    const { error } = await client
+      .from("ticket_replies")
+      .update({ is_read: true })
+      .eq("ticket_id", ticketId)
+      .neq("sender_id", user.id)
+      .eq("is_read", false);
+
+    if (error) {
+      console.warn("markTicketAsRead error:", error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed marking ticket as read" };
+  }
+}
 

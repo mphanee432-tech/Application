@@ -48,7 +48,9 @@ export default function SlaEscalationDashboard() {
       ]);
 
       setEscalatedBookings(bookings);
-      setProfessionals(pros.filter((p: any) => p.status === "approved" || p.kyc_status === "approved"));
+      const approvedPros = pros.filter((p: any) => p.status === "approved" || p.kyc_status === "approved");
+      approvedPros.sort((a: any, b: any) => (b.is_online ? 1 : 0) - (a.is_online ? 1 : 0));
+      setProfessionals(approvedPros);
     } catch (err: any) {
       console.error("Error loading escalation queue:", err);
       setFeedback({ type: "error", text: err.message || "Failed to load SLA queue." });
@@ -336,7 +338,7 @@ export default function SlaEscalationDashboard() {
                               <option value="">Select Technician...</option>
                               {professionals.map((pro) => (
                                 <option key={pro.id} value={pro.id}>
-                                  {pro.full_name || pro.trade} ({pro.trade})
+                                  {pro.is_online ? "🟢 [Online]" : "⚪ [Offline]"} {pro.full_name || pro.trade} ({pro.trade})
                                 </option>
                               ))}
                             </select>

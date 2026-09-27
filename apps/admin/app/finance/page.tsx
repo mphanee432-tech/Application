@@ -7,9 +7,9 @@ import {
   createBrowserSupabaseClient,
   getCurrentUser,
   fetchPlatformFinanceLedger,
-  approvePayoutAdmin,
   type Tables,
 } from "@repo/db";
+import { approvePayoutAdminAction } from "../actions";
 import {
   DollarSign,
   TrendingUp,
@@ -30,7 +30,7 @@ import {
 
 export default function AdminFinancePage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +64,7 @@ export default function AdminFinancePage() {
   };
 
   useEffect(() => {
+    let isMounted = true;
     let channel: any = null;
 
     async function init() {
@@ -74,29 +75,38 @@ export default function AdminFinancePage() {
           router.push("/login?redirect=/finance");
           return;
         }
+        if (!isMounted) return;
         setUser(currentUser);
         await loadFinanceData();
 
         // Realtime sync on transactions
+        const channelName = `admin-finance-${Date.now()}`;
         channel = supabase
-          .channel("admin-finance-realtime")
+          .channel(channelName)
           .on(
             "postgres_changes",
             { event: "*", schema: "public", table: "transactions" },
-            () => loadFinanceData()
-          )
-          .subscribe();
+            () => {
+              if (isMounted) {
+                loadFinanceData();
+              }
+            }
+          );
+        channel.subscribe();
       } catch (err) {
         console.error("Admin finance init error:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
     init();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      isMounted = false;
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 
@@ -106,9 +116,13 @@ export default function AdminFinancePage() {
       setActionSuccess(null);
       setActionError(null);
 
-      await approvePayoutAdmin(txId, supabase);
-      setActionSuccess(`Payout #${txId.slice(0, 8)} approved and cleared successfully!`);
-      await loadFinanceData();
+      const res = await approvePayoutAdminAction(txId);
+      if (res && res.success) {
+        setActionSuccess(`Payout #${txId.slice(0, 8)} approved and cleared successfully!`);
+        await loadFinanceData();
+      } else {
+        setActionError(res?.error || "Failed to approve payout");
+      }
     } catch (err: any) {
       setActionError(err.message || "Failed to approve payout");
     } finally {

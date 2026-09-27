@@ -36,14 +36,22 @@ export function DirectoriesView() {
     try {
       setLoading(true);
       const [fetchedCustomers, fetchedPros] = await Promise.all([
-        fetchAllCustomersAdmin(),
-        fetchAllProfessionalsAdmin(),
+        fetchAllCustomersAdmin().catch((e) => {
+          console.error("Failed fetching customers:", e);
+          return [];
+        }),
+        fetchAllProfessionalsAdmin().catch((e) => {
+          console.error("Failed fetching pros:", e);
+          return [];
+        }),
       ]);
-      setCustomers(fetchedCustomers || []);
-      setProfessionals(fetchedPros || []);
+      setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
+      setProfessionals(Array.isArray(fetchedPros) ? fetchedPros : []);
     } catch (err: any) {
       console.error("Error loading directories:", err);
-      setMessage({ type: "error", text: err.message || "Failed to load directory." });
+      setCustomers([]);
+      setProfessionals([]);
+      setMessage({ type: "error", text: err?.message || "Failed to load directory." });
     } finally {
       setLoading(false);
     }
@@ -67,7 +75,10 @@ export function DirectoriesView() {
   };
 
   // Filtered lists
-  const filteredCustomers = customers.filter((c) => {
+  const safeCustomers = Array.isArray(customers) ? customers : [];
+  const safePros = Array.isArray(professionals) ? professionals : [];
+
+  const filteredCustomers = safeCustomers.filter((c) => {
     const q = search.toLowerCase();
     const nameMatch = (c.full_name || "").toLowerCase().includes(q);
     const emailMatch = (c.email || "").toLowerCase().includes(q);
@@ -75,7 +86,7 @@ export function DirectoriesView() {
     return nameMatch || emailMatch || mobileMatch;
   });
 
-  const filteredPros = professionals.filter((p) => {
+  const filteredPros = safePros.filter((p) => {
     const q = search.toLowerCase();
     const nameMatch = (p.profile?.full_name || p.full_name || "").toLowerCase().includes(q);
     const emailMatch = (p.profile?.email || p.email || "").toLowerCase().includes(q);

@@ -47,7 +47,7 @@ const EmergencyDispatchMap = dynamic(
 
 export default function AdminSosHubPage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -57,48 +57,63 @@ export default function AdminSosHubPage() {
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const loadAlerts = async () => {
-    try {
-      const data = await fetchActiveSosAlertsAdmin(supabase);
-      setAlerts(data);
-    } catch (err: any) {
-      console.error("Failed to load SOS alerts:", err);
+    const result = await fetchActiveSosAlertsAdmin(supabase);
+    if (result.success && Array.isArray(result.data)) {
+      setAlerts(result.data);
+    } else {
+      console.error("Failed to load SOS alerts:", result.error);
+      setAlerts([]); // always keep alerts as a safe empty array, never undefined/object
     }
   };
 
   useEffect(() => {
-    let channel: any = null;
+    let isMounted = true;
+
+    // Decoupled Realtime subscription: established immediately on mount
+    const channel = supabase
+      .channel("admin-sos-channel")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "sos_alerts" },
+        (payload) => {
+          if (!isMounted) return;
+          console.log("Admin SOS Realtime alert received:", payload);
+          loadAlerts();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "sos_alerts" },
+        () => {
+          if (!isMounted) return;
+          loadAlerts();
+        }
+      )
+      .subscribe();
 
     async function init() {
       try {
         setLoading(true);
         const currentUser = await getCurrentUser(supabase);
+        if (!isMounted) return;
         if (!currentUser) {
           router.push("/login?redirect=/sos");
           return;
         }
         setUser(currentUser);
         await loadAlerts();
-
-        // Realtime subscription for SOS alerts
-        channel = supabase
-          .channel("admin-sos-realtime")
-          .on(
-            "postgres_changes",
-            { event: "*", schema: "public", table: "sos_alerts" },
-            () => loadAlerts()
-          )
-          .subscribe();
       } catch (err) {
         console.error("Admin SOS hub init error:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
     init();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 

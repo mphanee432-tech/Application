@@ -9,7 +9,7 @@ export default function HistoryPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   useEffect(() => {
     async function loadHistory() {
@@ -88,11 +88,19 @@ export default function HistoryPage() {
                   </div>
                 </div>
                 
-                <div className="text-left sm:text-right">
-                  <p className="text-sm text-slate-500">Payout</p>
-                  <p className={`text-2xl font-black ${job.status === 'completed' ? 'text-emerald-400' : 'text-slate-500 line-through'}`}>
-                    ${Number(job.price).toFixed(2)}
-                  </p>
+                <div className="text-left sm:text-right space-y-2">
+                  <div>
+                    <p className="text-sm text-slate-500">Payout</p>
+                    <p className={`text-2xl font-black ${job.status === 'completed' ? 'text-emerald-400' : 'text-slate-500 line-through'}`}>
+                      ${Number(job.price).toFixed(2)}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/jobs/${job.id}`}
+                    className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition"
+                  >
+                    <span>View Order Details →</span>
+                  </Link>
                 </div>
               </div>
             ))

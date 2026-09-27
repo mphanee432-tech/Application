@@ -1,11 +1,14 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState, useRef } from "react";
 import { 
   createBrowserSupabaseClient, 
   fetchActiveJobsForPro, 
   fetchChatMessages, 
-  sendChatMessage 
+  sendChatMessage,
+  markChatAsRead 
 } from "@repo/db";
 import Link from "next/link";
 import { ArrowLeft, Send, MessageSquare, Loader2, User } from "lucide-react";
@@ -49,6 +52,7 @@ export default function ChatPage() {
         const data = await fetchChatMessages(jobId);
         setMessages(data || []);
         scrollToBottom();
+        markChatAsRead(jobId, supabase).catch(() => {});
       } catch (err) {
         console.error("Failed to load messages", err);
       }
@@ -63,6 +67,9 @@ export default function ChatPage() {
         (payload) => {
           setMessages((prev) => [...prev, payload.new]);
           scrollToBottom();
+          if (payload.new && (payload.new as any).sender_id !== user?.id) {
+            markChatAsRead(selectedJobId, supabase).catch(() => {});
+          }
         }
       )
       .subscribe();
@@ -70,7 +77,7 @@ export default function ChatPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedJobId]);
+  }, [selectedJobId, user?.id]);
 
   const scrollToBottom = () => {
     setTimeout(() => {

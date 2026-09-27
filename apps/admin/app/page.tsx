@@ -9,10 +9,11 @@ import {
   fetchAllProfessionalsAdmin,
   fetchAllReviewsAdmin,
   getCurrentUser,
+  getUnreadSupportCount,
+  getActiveSosCountAdmin,
   type Tables,
 } from "@repo/db";
 import { approveProfessionalKyc } from "./actions";
-import { SupabaseStatusBadge } from "../components/SupabaseStatusBadge";
 import { ProofOfWorkAuditModal } from "../components/ProofOfWorkAuditModal";
 import { CatalogManager } from "../components/CatalogManager";
 import { DirectoriesView } from "../components/DirectoriesView";
@@ -39,6 +40,7 @@ import {
   MessageSquare,
   ShieldAlert,
   Wallet,
+  Megaphone,
 } from "lucide-react";
 
 export default function AdminPortal() {
@@ -57,21 +59,29 @@ export default function AdminPortal() {
   >("bookings");
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // Realtime badge counts
+  const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
+  const [activeSosCount, setActiveSosCount] = useState<number>(0);
+
   async function loadData() {
     setLoading(true);
     try {
       const currentUser = await getCurrentUser();
       setUser(currentUser);
 
-      const [allBookings, allPros, allReviews] = await Promise.all([
+      const [allBookings, allPros, allReviews, supportCount, sosCount] = await Promise.all([
         fetchAllBookingsAdmin(),
         fetchAllProfessionalsAdmin(),
         fetchAllReviewsAdmin(supabase),
+        getUnreadSupportCount(currentUser?.id, "admin", supabase),
+        getActiveSosCountAdmin(supabase),
       ]);
 
       setBookings(allBookings);
       setProfessionals(allPros);
       setReviews(allReviews);
+      setUnreadSupportCount(supportCount);
+      setActiveSosCount(sosCount);
     } catch (err) {
       console.error("Error loading admin data:", err);
     } finally {
@@ -93,6 +103,12 @@ export default function AdminPortal() {
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "reviews" }, () => {
         loadData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "sos_alerts" }, () => {
+        getActiveSosCountAdmin(supabase).then(setActiveSosCount);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ticket_replies" }, () => {
+        getUnreadSupportCount(undefined, "admin", supabase).then(setUnreadSupportCount);
       })
       .subscribe();
 
@@ -161,7 +177,14 @@ export default function AdminPortal() {
           </div>
 
           <div className="flex items-center gap-3">
-            <SupabaseStatusBadge />
+            <Link
+              href="/campaigns"
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-300 shadow-sm hover:bg-indigo-900/80 transition"
+              title="Broadcast Campaigns"
+            >
+              <Megaphone className="h-3.5 w-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Broadcasts</span>
+            </Link>
 
             {user ? (
               <div className="flex items-center gap-2">
@@ -329,6 +352,11 @@ export default function AdminPortal() {
             }`}
           >
             <span>Support Hub</span>
+            {unreadSupportCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white shadow-sm animate-pulse">
+                {unreadSupportCount > 99 ? "99+" : unreadSupportCount}
+              </span>
+            )}
           </button>
 
           <Link
@@ -340,19 +368,24 @@ export default function AdminPortal() {
           </Link>
 
           <Link
-            href="/cancellations"
-            className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-slate-400 hover:text-rose-400 transition shrink-0"
-          >
-            <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
-            <span>Cancellations</span>
-          </Link>
-
-          <Link
             href="/sos"
             className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-rose-400 hover:text-rose-300 transition shrink-0"
           >
             <ShieldAlert className="h-3.5 w-3.5 text-rose-500" />
             <span>Emergency SOS Hub</span>
+            {activeSosCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white shadow-sm animate-pulse">
+                {activeSosCount} Active
+              </span>
+            )}
+          </Link>
+
+          <Link
+            href="/campaigns"
+            className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition shrink-0"
+          >
+            <Megaphone className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Campaigns & Broadcasts</span>
           </Link>
         </div>
 

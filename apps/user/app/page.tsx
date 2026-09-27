@@ -11,14 +11,17 @@ import {
   fetchCustomerBookings,
   fetchCustomerAddresses,
   createCustomerAddress,
+  fetchBookingAddons,
+  getUnreadChatCount,
+  getUnreadSupportCount,
   type Tables,
 } from "@repo/db";
-import { SupabaseStatusBadge } from "../components/SupabaseStatusBadge";
+import { NotificationBell } from "../components/NotificationBell";
+import { AddonApprovalModal } from "../components/AddonApprovalModal";
 import { RateProfessionalModal } from "../components/RateProfessionalModal";
 import { AddressBookModal } from "../components/AddressBookModal";
 import { SupportTicketModal } from "../components/SupportTicketModal";
 import { UserProfileModal } from "../components/UserProfileModal";
-import CancelRescheduleModal from "../components/CancelRescheduleModal";
 import {
   MapPin,
   Wrench,
@@ -38,6 +41,7 @@ import {
   LifeBuoy,
   Wallet,
   ShieldAlert,
+  MessageSquare,
 } from "lucide-react";
 
 // Dynamically import Draggable Map to disable SSR for Leaflet
@@ -54,7 +58,7 @@ const DraggableAddressMap = dynamic(
 );
 
 export default function UserPortal() {
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   // Dynamic catalog state
   const [cities, setCities] = useState<Tables<"cities">[]>([]);
@@ -76,13 +80,12 @@ export default function UserPortal() {
   const [addressText, setAddressText] = useState("742 Evergreen Terrace, Sector 4");
   const [jobNotes, setJobNotes] = useState("");
   const [saveToAddressBook, setSaveToAddressBook] = useState(false);
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [preferredTime, setPreferredTime] = useState("morning");
 
   // User session & Booking lifecycle state
   const [user, setUser] = useState<any>(null);
   const [userBookings, setUserBookings] = useState<any[]>([]);
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
+  const [activeBookings, setActiveBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -90,7 +93,14 @@ export default function UserPortal() {
   // Review modal state
   const [reviewBooking, setReviewBooking] = useState<any | null>(null);
   const [reviewedBookingIds, setReviewedBookingIds] = useState<string[]>([]);
-  const [manageBooking, setManageBooking] = useState<any | null>(null);
+
+  // Add-on approval modal state
+  const [pendingAddonToReview, setPendingAddonToReview] = useState<any | null>(null);
+  const [bookingAddonsMap, setBookingAddonsMap] = useState<Record<string, any[]>>({});
+
+  // Realtime badge counts
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
 
   // Load initial data
   const loadInitialData = async () => {
@@ -100,6 +110,10 @@ export default function UserPortal() {
       // Check current user
       const { data: authData } = await supabase.auth.getUser();
       setUser(authData.user);
+      if (authData.user) {
+        getUnreadChatCount(authData.user.id, supabase).then(setUnreadChatCount);
+        getUnreadSupportCount(authData.user.id, "customer", supabase).then(setUnreadSupportCount);
+      }
 
       // Fetch dynamic active cities
       const fetchedCities = await fetchActiveCities(supabase);
@@ -128,10 +142,29 @@ export default function UserPortal() {
         setUserBookings(bookings);
         setSavedAddresses(addresses);
 
-        const ongoing = bookings.find((b) =>
+        const ongoingList = bookings.filter((b) =>
           ["pending", "accepted", "en_route", "arrived", "in_progress"].includes(b.status)
         );
-        setActiveBooking(ongoing || null);
+        setActiveBookings(ongoingList);
+        setActiveBooking(ongoingList[0] || null);
+
+        // Fetch add-ons for ongoing bookings
+        const addonsEntries = await Promise.all(
+          ongoingList.map(async (b) => {
+            const res = await fetchBookingAddons(b.id, supabase);
+            const addons = res.success ? (res.data || []) : [];
+            return [b.id, addons] as const;
+          })
+        );
+        setBookingAddonsMap(Object.fromEntries(addonsEntries));
+
+        for (const [, addons] of addonsEntries) {
+          const pending = (addons as any[]).find((a: any) => a.status === "pending");
+          if (pending) {
+            setPendingAddonToReview(pending);
+            break;
+          }
+        }
 
         // Pre-fill from default address if available
         const defaultAddr = addresses.find((a) => a.is_default);
@@ -163,53 +196,89 @@ export default function UserPortal() {
   }, [selectedCityId]);
 
   useEffect(() => {
+    let isMounted = true;
     loadInitialData();
 
     // Subscribe to auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      if (!isMounted) return;
       setUser(session?.user || null);
       if (session?.user) {
         Promise.all([
           fetchCustomerBookings(supabase),
           fetchCustomerAddresses(supabase),
         ]).then(([bookings, addresses]) => {
+          if (!isMounted) return;
           setUserBookings(bookings);
           setSavedAddresses(addresses);
-          const ongoing = bookings.find((b) =>
+          const ongoingList = bookings.filter((b) =>
             ["pending", "accepted", "en_route", "arrived", "in_progress"].includes(b.status)
           );
-          setActiveBooking(ongoing || null);
+          setActiveBookings(ongoingList);
+          setActiveBooking(ongoingList[0] || null);
         });
       }
     });
 
     // Realtime channel for bookings updates
+    const channelName = `customer-bookings-${Date.now()}`;
     const channel = supabase
-      .channel("customer-bookings-live")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
         () => {
+          if (!isMounted) return;
           fetchCustomerBookings(supabase).then((bookings) => {
+            if (!isMounted) return;
             setUserBookings(bookings);
-            const ongoing = bookings.find((b) =>
+            const ongoingList = bookings.filter((b) =>
               ["pending", "accepted", "en_route", "arrived", "in_progress"].includes(b.status)
             );
-            setActiveBooking(ongoing || null);
+            setActiveBookings(ongoingList);
+            setActiveBooking(ongoingList[0] || null);
 
             // If an active booking was just completed, check if we should prompt for review
             const justCompleted = bookings.find(
               (b) => b.status === "completed" && b.professional_id && !reviewedBookingIds.includes(b.id)
             );
-            if (justCompleted && !ongoing) {
+            if (justCompleted && ongoingList.length === 0) {
               setReviewBooking(justCompleted);
             }
           });
         }
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "job_addons" },
+        (payload: any) => {
+          if (!isMounted) return;
+          if (payload.new && payload.new.status === "pending") {
+            setPendingAddonToReview(payload.new);
+          }
+          loadInitialData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_messages" },
+        () => {
+          if (!isMounted) return;
+          getUnreadChatCount(undefined, supabase).then(setUnreadChatCount);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ticket_replies" },
+        () => {
+          if (!isMounted) return;
+          getUnreadSupportCount(undefined, "customer", supabase).then(setUnreadSupportCount);
+        }
+      );
+    channel.subscribe();
 
     return () => {
+      isMounted = false;
       authListener.subscription.unsubscribe();
       supabase.removeChannel(channel);
     };
@@ -264,12 +333,11 @@ export default function UserPortal() {
           address: `${addressText}, ${selectedCity.name}`,
           price: Number(selectedService.base_price),
           notes: jobNotes,
-          scheduledDate: scheduledDate ? new Date(`${scheduledDate}T00:00:00`).toISOString() : undefined,
-          preferredTime: scheduledDate ? preferredTime : undefined,
         },
         supabase
       );
 
+      setActiveBookings((prev) => [newBooking, ...prev]);
       setActiveBooking(newBooking);
       setMessage({ type: "success", text: "Job broadcast created! Searching for nearby professionals..." });
 
@@ -287,6 +355,7 @@ export default function UserPortal() {
     await supabase.auth.signOut();
     setUser(null);
     setActiveBooking(null);
+    setActiveBookings([]);
     setUserBookings([]);
     setSavedAddresses([]);
   };
@@ -314,43 +383,62 @@ export default function UserPortal() {
           </div>
 
           <div className="flex items-center gap-3">
-            <SupabaseStatusBadge />
-
             {user && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
+                <NotificationBell />
+
                 <Link
                   href="/wallet"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
                   title="In-App Wallet & Credits"
                 >
-                  <Wallet className="h-3.5 w-3.5 text-emerald-400" />
+                  <Wallet className="h-4 w-4 text-emerald-400" />
                   <span className="hidden sm:inline">Wallet</span>
                 </Link>
 
                 <button
                   onClick={() => setShowAddressModal(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
                   title="Saved Addresses"
                 >
-                  <Home className="h-3.5 w-3.5 text-blue-400" />
+                  <Home className="h-4 w-4 text-blue-400" />
                   <span className="hidden sm:inline">Addresses</span>
                 </button>
 
+                <Link
+                  href="/chat"
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  title="Messages & Chat"
+                >
+                  <MessageSquare className="h-4 w-4 text-indigo-400" />
+                  <span className="hidden sm:inline">Chat</span>
+                  {unreadChatCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-md animate-pulse">
+                      {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                    </span>
+                  )}
+                </Link>
+
                 <button
                   onClick={() => setShowSupportModal(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
                   title="Help & Support"
                 >
-                  <LifeBuoy className="h-3.5 w-3.5 text-blue-400" />
+                  <LifeBuoy className="h-4 w-4 text-blue-400" />
                   <span className="hidden sm:inline">Support</span>
+                  {unreadSupportCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-md animate-pulse">
+                      {unreadSupportCount > 99 ? "99+" : unreadSupportCount}
+                    </span>
+                  )}
                 </button>
 
                 <Link
                   href="/sos"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-rose-800/60 bg-rose-950/60 hover:bg-rose-900/60 text-xs font-bold text-rose-300 transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-800/60 bg-rose-950/60 hover:bg-rose-900/60 text-xs font-bold text-rose-300 transition"
                   title="Trust & Safety SOS"
                 >
-                  <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                  <ShieldAlert className="h-4 w-4 text-rose-400" />
                   <span className="hidden sm:inline">SOS</span>
                 </Link>
               </div>
@@ -603,36 +691,6 @@ export default function UserPortal() {
                 </label>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-4 border-t border-slate-800 pt-4 mt-2">
-                <div className="flex-1">
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Scheduled Date (Optional)
-                  </label>
-                  <input
-                    type="date"
-                    value={scheduledDate}
-                    onChange={(e) => setScheduledDate(e.target.value)}
-                    min={new Date().toISOString().split("T")[0]}
-                    className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Preferred Time
-                  </label>
-                  <select
-                    value={preferredTime}
-                    onChange={(e) => setPreferredTime(e.target.value)}
-                    disabled={!scheduledDate}
-                    className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    <option value="morning">Morning (8am - 12pm)</option>
-                    <option value="afternoon">Afternoon (12pm - 4pm)</option>
-                    <option value="evening">Evening (4pm - 8pm)</option>
-                  </select>
-                </div>
-              </div>
-
               <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-slate-400 block">Total Estimated Price</span>
@@ -661,153 +719,217 @@ export default function UserPortal() {
                 <h3 className="font-semibold text-sm text-slate-100 flex items-center gap-1.5">
                   <Navigation className="h-4 w-4 text-blue-400" /> Live Dispatch Tracker
                 </h3>
-                {activeBooking && (
+                {activeBookings.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                    {activeBooking.status}
+                    {activeBookings.length} {activeBookings.length === 1 ? "Active Job" : "Active Jobs"}
                   </span>
                 )}
               </div>
 
-              {activeBooking ? (
+              {activeBookings.length > 0 ? (
                 <div className="space-y-4">
-                  <div className="p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="font-semibold text-xs text-slate-200">
-                        {activeBooking.service_type || activeBooking.service?.name}
-                      </span>
-                      <span className="text-xs font-bold text-emerald-400">
-                        ${Number(activeBooking.price).toFixed(2)}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400">{activeBooking.address}</p>
-                    <div className="mt-2 text-[10px] font-mono text-slate-500">
-                      ID: {activeBooking.id.slice(0, 8)}... | Geolocation: {Number(activeBooking.latitude || activeBooking.lat).toFixed(4)}, {Number(activeBooking.longitude || activeBooking.lng).toFixed(4)}
-                    </div>
-                  </div>
+                  {activeBookings.map((b) => {
+                    const order = ["pending", "accepted", "en_route", "arrived", "in_progress", "completed"];
+                    const currentIdx = order.indexOf(b.status);
 
-                  {/* Stepper (6 Stages) */}
-                  <div className="space-y-2.5 pt-1">
-                    {[
-                      { status: "pending", label: "Broadcast Sent", desc: "Waiting for nearby professional to accept" },
-                      { status: "accepted", label: "Professional Matched", desc: "Assigned provider claimed your dispatch" },
-                      { status: "en_route", label: "En Route to Location", desc: "Provider is navigating using GPS coordinates" },
-                      { status: "arrived", label: "Provider Arrived", desc: "Technician has arrived on site" },
-                      { status: "in_progress", label: "Work Underway", desc: "Service repairs actively in progress" },
-                      { status: "completed", label: "Job Completed", desc: "Work order finished and verified with proof photos" },
-                    ].map((step, idx) => {
-                      const order = ["pending", "accepted", "en_route", "arrived", "in_progress", "completed"];
-                      const currentIdx = order.indexOf(activeBooking.status);
-                      const isComplete = currentIdx >= idx;
-                      const isCurrent = activeBooking.status === step.status;
-
-                      return (
-                        <div key={step.status} className="flex items-start gap-3 text-xs">
-                          <div
-                            className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
-                              isComplete
-                                ? "bg-emerald-600 text-white"
-                                : "bg-slate-800 text-slate-500 border border-slate-700"
-                            }`}
-                          >
-                            {isComplete ? "✓" : idx + 1}
-                          </div>
-                          <div>
-                            <span
-                              className={`font-semibold ${
-                                isCurrent ? "text-blue-400" : isComplete ? "text-slate-200" : "text-slate-500"
-                              }`}
-                            >
-                              {step.label}
-                            </span>
-                            <p className="text-[11px] text-slate-400">{step.desc}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Verified Proof-of-Work Photos (if completed or available) */}
-                  {activeBooking.proof_photos &&
-                    (activeBooking.proof_photos.before || activeBooking.proof_photos.after) && (
-                      <div className="p-3 bg-slate-950/70 border border-emerald-900/40 rounded-xl space-y-2">
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-                          <Camera className="h-3.5 w-3.5" />
-                          <span>Verified Proof-of-Work Audit</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {activeBooking.proof_photos.before && (
-                            <div>
-                              <span className="text-[9px] text-slate-400 block mb-1">Before Service</span>
-                              <img
-                                src={activeBooking.proof_photos.before}
-                                alt="Before service"
-                                className="rounded-lg h-24 w-full object-cover border border-slate-800"
-                              />
-                            </div>
-                          )}
-                          {activeBooking.proof_photos.after && (
-                            <div>
-                              <span className="text-[9px] text-slate-400 block mb-1">After Service</span>
-                              <img
-                                src={activeBooking.proof_photos.after}
-                                alt="After service"
-                                className="rounded-lg h-24 w-full object-cover border border-slate-800"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                  {/* Professional Card if Matched */}
-                  {activeBooking.professional && (
-                    <div className="mt-3 p-3 bg-blue-950/30 border border-blue-800/40 rounded-xl flex items-center justify-between text-xs">
-                      <div>
-                        <span className="text-[10px] text-blue-400 uppercase font-bold block">Assigned Provider</span>
-                        <span className="font-semibold text-slate-200">
-                          {activeBooking.professional.profile?.full_name || "Certified Technician"}
-                        </span>
-                        <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                          <span>{activeBooking.professional.trade}</span>
-                          <span>•</span>
-                          <span className="text-amber-400 flex items-center gap-0.5 font-medium">
-                            <Star className="h-3 w-3 fill-amber-400" />
-                            {activeBooking.professional.rating ? Number(activeBooking.professional.rating).toFixed(1) : "5.0"}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => alert(`Calling provider: ${activeBooking.professional.profile?.phone || "555-0199"}`)}
-                        className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+                    return (
+                      <div
+                        key={b.id}
+                        className="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-3"
                       >
-                        <Phone className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-xs text-slate-200">
+                                {b.service_type || b.service?.name}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                {b.status}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1">{b.address}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs font-bold text-emerald-400 block">
+                              ${Number(b.price).toFixed(2)}
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-500">
+                              #{b.id.slice(0, 8)}
+                            </span>
+                          </div>
+                        </div>
 
-                  {/* Completed Booking Review Action */}
-                  {activeBooking.status === "completed" && activeBooking.professional_id && (
-                    <button
-                      onClick={() => setReviewBooking(activeBooking)}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      <span>
-                        {reviewedBookingIds.includes(activeBooking.id)
-                          ? "Update Review for Provider"
-                          : "Rate Your Service Provider"}
-                      </span>
-                    </button>
-                  )}
+                        {/* Mini Lifecycle Stepper */}
+                        <div className="space-y-1.5 pt-1">
+                          {[
+                            { status: "pending", label: "Broadcast Sent" },
+                            { status: "accepted", label: "Matched" },
+                            { status: "en_route", label: "En Route" },
+                            { status: "arrived", label: "Arrived" },
+                            { status: "in_progress", label: "In Progress" },
+                            { status: "completed", label: "Completed" },
+                          ].map((step, idx) => {
+                            const isComplete = currentIdx >= idx;
+                            const isCurrent = b.status === step.status;
+                            return (
+                              <div key={step.status} className="flex items-center gap-2 text-[11px]">
+                                <div
+                                  className={`h-4 w-4 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
+                                    isComplete
+                                      ? "bg-emerald-600 text-white"
+                                      : "bg-slate-800 text-slate-500 border border-slate-700"
+                                  }`}
+                                >
+                                  {isComplete ? "✓" : idx + 1}
+                                </div>
+                                <span
+                                  className={`font-medium ${
+                                    isCurrent ? "text-blue-400 font-semibold" : isComplete ? "text-slate-300" : "text-slate-500"
+                                  }`}
+                                >
+                                  {step.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
 
-                  {(activeBooking.status === "pending" || activeBooking.status === "accepted") && (
-                    <button
-                      onClick={() => setManageBooking(activeBooking)}
-                      className="w-full py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-xl text-xs font-semibold transition-all mt-2"
-                    >
-                      Manage Booking
-                    </button>
-                  )}
+                        {/* Verified Proof-of-Work Photos (if available) */}
+                        {b.proof_photos && (b.proof_photos.before || b.proof_photos.after) && (
+                          <div className="p-2.5 bg-slate-950/70 border border-emerald-900/40 rounded-xl space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-400 uppercase tracking-wider">
+                              <Camera className="h-3 w-3" />
+                              <span>Verified Proof-of-Work</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {b.proof_photos.before && (
+                                <div>
+                                  <span className="text-[9px] text-slate-400 block mb-0.5">Before</span>
+                                  <img
+                                    src={b.proof_photos.before}
+                                    alt="Before service"
+                                    className="rounded-lg h-20 w-full object-cover border border-slate-800"
+                                  />
+                                </div>
+                              )}
+                              {b.proof_photos.after && (
+                                <div>
+                                  <span className="text-[9px] text-slate-400 block mb-0.5">After</span>
+                                  <img
+                                    src={b.proof_photos.after}
+                                    alt="After service"
+                                    className="rounded-lg h-20 w-full object-cover border border-slate-800"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Assigned Provider Info */}
+                        {b.professional && (
+                          <div className="p-2.5 bg-blue-950/30 border border-blue-800/40 rounded-xl flex items-center justify-between text-xs">
+                            <div>
+                              <span className="text-[9px] text-blue-400 uppercase font-bold block">Assigned Provider</span>
+                              <span className="font-semibold text-slate-200">
+                                {b.professional.profile?.full_name || "Certified Technician"}
+                              </span>
+                              <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                <span>{b.professional.trade}</span>
+                                <span>•</span>
+                                <span className="text-amber-400 flex items-center gap-0.5 font-medium">
+                                  <Star className="h-2.5 w-2.5 fill-amber-400" />
+                                  {b.professional.rating ? Number(b.professional.rating).toFixed(1) : "5.0"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Link
+                                href="/chat"
+                                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-medium flex items-center gap-1 transition"
+                                title="Chat with Provider"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                                <span>Chat</span>
+                              </Link>
+                              <button
+                                onClick={() => alert(`Calling provider: ${b.professional.profile?.phone || "555-0199"}`)}
+                                className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+                                title="Call Provider"
+                              >
+                                <Phone className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Mid-Job Add-ons Section */}
+                        {(() => {
+                          const addons = bookingAddonsMap[b.id] || [];
+                          const approved = addons.filter((a) => a.status === "approved");
+                          const pending = addons.filter((a) => a.status === "pending");
+                          const approvedTotal = approved.reduce(
+                            (sum, a) => sum + Number(a.cost || 0),
+                            0
+                          );
+
+                          if (addons.length === 0) return null;
+
+                          return (
+                            <div className="space-y-2 border-t border-slate-700/50 pt-2">
+                              {pending.length > 0 && (
+                                <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-950/50 border border-amber-800/70 text-xs text-amber-300">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-amber-400 animate-pulse shrink-0" />
+                                    <span>
+                                      <strong>Add-on Suggested (+${Number(pending[0].cost).toFixed(2)}):</strong>{" "}
+                                      {pending[0].custom_description ||
+                                        pending[0].service?.name ||
+                                        "Additional labor/part"}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => setPendingAddonToReview(pending[0])}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow-sm transition shrink-0 ml-2"
+                                  >
+                                    Review & Decide
+                                  </button>
+                                </div>
+                              )}
+
+                              {approved.length > 0 && (
+                                <div className="flex items-center justify-between text-xs text-emerald-400 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-900/50">
+                                  <span>Approved Mid-Job Add-ons ({approved.length})</span>
+                                  <span className="font-bold">+${approvedTotal.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Drill-down Navigation & Actions */}
+                        <div className="pt-2 border-t border-slate-700/50 flex items-center justify-between">
+                          <Link
+                            href={`/bookings/${b.id}`}
+                            className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                          >
+                            <span>Drill-Down Details</span>
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </Link>
+
+                          {b.status === "completed" && b.professional_id && (
+                            <button
+                              onClick={() => setReviewBooking(b)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              <span>{reviewedBookingIds.includes(b.id) ? "Update Review" : "Rate Provider"}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-8 text-xs text-slate-500">
@@ -848,14 +970,12 @@ export default function UserPortal() {
                       <div className="text-right">
                         <span className="font-bold text-emerald-400 text-xs">${Number(b.price).toFixed(2)}</span>
                         <div className="text-[10px] font-mono text-slate-400 uppercase">{b.status}</div>
-                        {(b.status === "pending" || b.status === "accepted") && (
-                          <button
-                            onClick={() => setManageBooking(b)}
-                            className="mt-1 px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] font-medium transition-colors"
-                          >
-                            Manage
-                          </button>
-                        )}
+                        <Link
+                          href={`/bookings/${b.id}`}
+                          className="text-[10px] text-blue-400 hover:underline block mt-0.5"
+                        >
+                          View Details →
+                        </Link>
                       </div>
                     </div>
                   ))}
@@ -899,13 +1019,20 @@ export default function UserPortal() {
         onClose={() => setShowSupportModal(false)}
       />
 
-      <CancelRescheduleModal
-        booking={manageBooking}
-        isOpen={!!manageBooking}
-        onClose={() => setManageBooking(null)}
-        onSuccess={() => {
-          setManageBooking(null);
+      {/* Mid-Job Add-on Realtime Approval Modal */}
+      <AddonApprovalModal
+        isOpen={Boolean(pendingAddonToReview)}
+        addon={pendingAddonToReview}
+        onClose={() => setPendingAddonToReview(null)}
+        onResponded={(approved) => {
+          setPendingAddonToReview(null);
           loadInitialData();
+          setMessage({
+            type: "success",
+            text: approved
+              ? "Add-on approved! Your final invoice has been updated."
+              : "Add-on declined. Your provider has been notified.",
+          });
         }}
       />
 

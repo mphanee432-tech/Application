@@ -182,23 +182,35 @@ export type Database = {
       chat_messages: {
         Row: {
           booking_id: string
+          channel_type: string | null
           created_at: string
           id: string
+          is_admin: boolean | null
+          is_read: boolean
           message: string
+          participant_role: string | null
           sender_id: string
         }
         Insert: {
           booking_id: string
+          channel_type?: string | null
           created_at?: string
           id?: string
+          is_admin?: boolean | null
+          is_read?: boolean
           message: string
+          participant_role?: string | null
           sender_id: string
         }
         Update: {
           booking_id?: string
+          channel_type?: string | null
           created_at?: string
           id?: string
+          is_admin?: boolean | null
+          is_read?: boolean
           message?: string
+          participant_role?: string | null
           sender_id?: string
         }
         Relationships: [
@@ -330,9 +342,11 @@ export type Database = {
           booking_id: string
           cost: number
           created_at: string
+          custom_description: string | null
           id: string
           item_name: string
           photo_url: string | null
+          service_id: string | null
           status: string
           updated_at: string
         }
@@ -340,9 +354,11 @@ export type Database = {
           booking_id: string
           cost: number
           created_at?: string
+          custom_description?: string | null
           id?: string
           item_name: string
           photo_url?: string | null
+          service_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -350,13 +366,22 @@ export type Database = {
           booking_id?: string
           cost?: number
           created_at?: string
+          custom_description?: string | null
           id?: string
           item_name?: string
           photo_url?: string | null
+          service_id?: string | null
           status?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "fk_job_addons_service"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "job_addons_booking_id_fkey"
             columns: ["booking_id"]
@@ -365,6 +390,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          is_read: boolean
+          message: string
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message: string
+          title: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message?: string
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       professional_availability: {
         Row: {
@@ -615,22 +670,34 @@ export type Database = {
       services: {
         Row: {
           base_price: number
+          category: string | null
           created_at: string
+          description: string | null
+          icon: string | null
           id: string
+          image_url: string | null
           is_active: boolean
           name: string
         }
         Insert: {
           base_price?: number
+          category?: string | null
           created_at?: string
+          description?: string | null
+          icon?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean
           name: string
         }
         Update: {
           base_price?: number
+          category?: string | null
           created_at?: string
+          description?: string | null
+          icon?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean
           name?: string
         }
@@ -751,6 +818,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_read: boolean
           message: string
           sender_id: string
           sender_role: string
@@ -759,6 +827,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          is_read?: boolean
           message: string
           sender_id: string
           sender_role: string
@@ -767,6 +836,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          is_read?: boolean
           message?: string
           sender_id?: string
           sender_role?: string

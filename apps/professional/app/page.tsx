@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -7,15 +9,21 @@ import {
   createBrowserSupabaseClient,
   fetchAvailableJobs,
   fetchActiveJobForPro,
+  fetchActiveJobsForPro,
   acceptJob,
   updateJobStatus,
   getCurrentUser,
   fetchCurrentProfessional,
+  setProfessionalOnlineStatus,
+  fetchBookingAddons,
+  getUnreadChatCount,
+  getUnreadSupportCount,
   type Tables,
 } from "@repo/db";
-import { SupabaseStatusBadge } from "../components/SupabaseStatusBadge";
+import { NotificationBell } from "../components/NotificationBell";
 import KycOnboardingModal from "../components/KycOnboardingModal";
 import { ProofOfWorkModal } from "../components/ProofOfWorkModal";
+import { AddServicePartDrawer } from "../components/AddServicePartDrawer";
 import { RateCustomerModal } from "../components/RateCustomerModal";
 import { ProSupportModal } from "../components/ProSupportModal";
 import { ProProfileModal } from "../components/ProProfileModal";
@@ -45,16 +53,20 @@ import {
   Calendar,
   MessageSquare,
   History,
+  ChevronRight,
+  Plus,
+  Sparkles,
 } from "lucide-react";
 
 export default function ProfessionalPortal() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   const [user, setUser] = useState<any>(null);
   const [proRecord, setProRecord] = useState<any>(null);
   const [availableJobs, setAvailableJobs] = useState<any[]>([]);
   const [activeJob, setActiveJob] = useState<any | null>(null);
+  const [activeJobs, setActiveJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
@@ -67,6 +79,13 @@ export default function ProfessionalPortal() {
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [ratingBooking, setRatingBooking] = useState<any | null>(null);
+  const [showAddonDrawer, setShowAddonDrawer] = useState(false);
+  const [addonDrawerJob, setAddonDrawerJob] = useState<any | null>(null);
+  const [jobAddonsMap, setJobAddonsMap] = useState<Record<string, any[]>>({});
+
+  // Realtime badge counts
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
 
   async function loadData() {
     setLoading(true);
@@ -75,29 +94,50 @@ export default function ProfessionalPortal() {
       setUser(currentUser);
 
       if (currentUser) {
+        getUnreadChatCount(currentUser.id, supabase).then(setUnreadChatCount);
+        getUnreadSupportCount(currentUser.id, "professional", supabase).then(setUnreadSupportCount);
+
         const proResponse = await fetchCurrentProfessional(supabase);
         if (!proResponse.success) {
           console.error("Failed to load professional data:", proResponse.error);
           setFeedbackMessage(proResponse.error || "Failed to load professional data.");
           setProRecord(null);
           setAvailableJobs([]);
+          setActiveJobs([]);
           setActiveJob(null);
           return;
         }
 
         const proData = proResponse.data;
         setProRecord(proData);
+        if (proData) {
+          setIsOnline(proData.is_online !== false);
+        }
 
-        const [jobs, active] = await Promise.all([
+        const [jobs, activeList] = await Promise.all([
           fetchAvailableJobs(proData?.id),
-          fetchActiveJobForPro(),
+          fetchActiveJobsForPro(),
         ]);
         setAvailableJobs(jobs);
-        setActiveJob(active);
+        setActiveJobs(activeList);
+        setActiveJob(activeList[0] || null);
+
+        // Fetch add-ons for each active job
+        const addonsEntries = await Promise.all(
+          activeList.map(async (job) => {
+            const res = await fetchBookingAddons(job.id, supabase);
+            const addons = res.success ? (res.data || []) : [];
+            if (!res.success) console.error("fetchBookingAddons error:", res.error);
+            return [job.id, addons] as const;
+          })
+        );
+        setJobAddonsMap(Object.fromEntries(addonsEntries));
       } else {
         setProRecord(null);
         setAvailableJobs([]);
+        setActiveJobs([]);
         setActiveJob(null);
+        setJobAddonsMap({});
       }
     } catch (err: any) {
       console.error("Error loading professional data:", err);
@@ -108,36 +148,61 @@ export default function ProfessionalPortal() {
   }
 
   useEffect(() => {
+    let isMounted = true;
     loadData();
 
-    // Subscribe to real-time changes on bookings, professionals (for instant KYC sync), and profiles
+    // Subscribe to real-time changes on bookings, professionals, profiles, and job_addons
+    const channelName = `pro-portal-sync-${Date.now()}`;
     const channel = supabase
-      .channel("public:professional_portal_sync")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
         () => {
-          loadData();
+          if (isMounted) loadData();
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "professionals" },
         () => {
-          // Instant KYC approval sync: when Admin clicks Approve, pro automatically unblocks!
-          loadData();
+          if (isMounted) loadData();
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "profiles" },
         () => {
-          loadData();
+          if (isMounted) loadData();
         }
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "job_addons" },
+        () => {
+          if (isMounted) loadData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_messages" },
+        () => {
+          if (!isMounted) return;
+          getUnreadChatCount(undefined, supabase).then(setUnreadChatCount);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ticket_replies" },
+        () => {
+          if (!isMounted) return;
+          getUnreadSupportCount(undefined, "professional", supabase).then(setUnreadSupportCount);
+        }
+      );
+    channel.subscribe();
 
     return () => {
+      isMounted = false;
       supabase.removeChannel(channel);
     };
   }, []);
@@ -164,17 +229,32 @@ export default function ProfessionalPortal() {
     }
   }
 
-  async function handleUpdateStatus(status: "en_route" | "arrived" | "in_progress" | "completed") {
-    if (!activeJob) return;
+  async function handleUpdateStatus(
+    bookingIdOrStatus: string,
+    maybeStatus?: "en_route" | "arrived" | "in_progress" | "completed"
+  ) {
+    let bookingId: string;
+    let status: "en_route" | "arrived" | "in_progress" | "completed";
+
+    if (maybeStatus) {
+      bookingId = bookingIdOrStatus;
+      status = maybeStatus;
+    } else {
+      if (!activeJob) return;
+      bookingId = activeJob.id;
+      status = bookingIdOrStatus as any;
+    }
 
     if (status === "completed") {
+      const targetJob = activeJobs.find((j) => j.id === bookingId) || activeJob;
+      setActiveJob(targetJob);
       setShowProofModal(true);
       return;
     }
 
-    setActionLoading(status);
+    setActionLoading(`${bookingId}-${status}`);
     try {
-      await updateJobStatus(activeJob.id, status, supabase);
+      await updateJobStatus(bookingId, status, supabase);
       setFeedbackMessage(`Status updated to ${status}!`);
       await loadData();
     } catch (err: unknown) {
@@ -186,12 +266,37 @@ export default function ProfessionalPortal() {
     }
   }
 
+  const handleToggleOnlineStatus = async () => {
+    if (!user) return;
+    const nextStatus = !isOnline;
+    setIsOnline(nextStatus);
+    try {
+      await setProfessionalOnlineStatus(user.id, nextStatus, supabase);
+      setFeedbackMessage(nextStatus ? "You are now ONLINE and ready for jobs." : "You are now OFFLINE.");
+      if (proRecord?.id) {
+        const jobs = await fetchAvailableJobs(proRecord.id, supabase);
+        setAvailableJobs(jobs);
+      }
+    } catch (err: any) {
+      console.error("Failed to update online status:", err);
+      setIsOnline(!nextStatus);
+    }
+  };
+
   async function handleSignOut() {
+    if (user) {
+      try {
+        await setProfessionalOnlineStatus(user.id, false, supabase);
+      } catch (err) {
+        console.error("Failed to set offline on logout:", err);
+      }
+    }
     await supabase.auth.signOut();
     setUser(null);
     setProRecord(null);
     setAvailableJobs([]);
     setActiveJob(null);
+    setIsOnline(false);
   }
 
   const isApproved = proRecord?.status === "approved" || proRecord?.kyc_status === "approved";
@@ -217,13 +322,13 @@ export default function ProfessionalPortal() {
           </div>
 
           <div className="flex items-center gap-3">
-            <SupabaseStatusBadge />
-
             {user ? (
               <div className="flex items-center gap-2">
+                <NotificationBell />
+
                 {/* Online Toggle */}
                 <button
-                  onClick={() => setIsOnline(!isOnline)}
+                  onClick={handleToggleOnlineStatus}
                   className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
                     isOnline
                       ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
@@ -261,11 +366,16 @@ export default function ProfessionalPortal() {
                 {/* Direct Coordination Chat */}
                 <Link
                   href="/chat"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
                   title="Active Job Messages"
                 >
                   <MessageSquare className="h-3.5 w-3.5 text-sky-400" />
                   <span className="hidden lg:inline">Chat</span>
+                  {unreadChatCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-md animate-pulse">
+                      {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                    </span>
+                  )}
                 </Link>
 
                 {/* Job History */}
@@ -291,11 +401,16 @@ export default function ProfessionalPortal() {
                 {/* Support Modal Trigger */}
                 <button
                   onClick={() => setShowSupportModal(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
+                  className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition"
                   title="Contact Dispatch Ops"
                 >
                   <LifeBuoy className="h-3.5 w-3.5 text-emerald-400" />
                   <span className="hidden sm:inline">Support</span>
+                  {unreadSupportCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-md animate-pulse">
+                      {unreadSupportCount > 99 ? "99+" : unreadSupportCount}
+                    </span>
+                  )}
                 </button>
 
                 {/* SOS Trigger Link */}
@@ -429,7 +544,7 @@ export default function ProfessionalPortal() {
           {/* Active Job Workflow (7 cols) */}
           <div className="lg:col-span-7 space-y-6">
             <div>
-              <h3 className="text-base font-bold text-white">Active Job Assignment</h3>
+              <h3 className="text-base font-bold text-white">Active Job Assignments</h3>
               <p className="text-xs text-slate-400">Live order execution, navigation, and proof-of-work</p>
             </div>
 
@@ -438,109 +553,180 @@ export default function ProfessionalPortal() {
                 <Loader2 className="h-5 w-5 animate-spin mr-2 text-emerald-400" />
                 Loading active database assignments...
               </div>
-            ) : activeJob ? (
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-6 shadow-xl">
-                <div className="flex items-start justify-between border-b border-slate-800 pb-4">
-                  <div>
-                    <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/20">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      Order #{activeJob.id.slice(0, 8)} • Status: {activeJob.status.toUpperCase()}
-                    </div>
-                    <h2 className="mt-2 text-lg font-bold text-white">{activeJob.service_type}</h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Customer: {activeJob.customer?.full_name || "Homeowner"} • {activeJob.customer?.phone || activeJob.customer?.mobile || "No phone listed"}
-                    </p>
-                  </div>
-
-                  <div className="text-right">
-                    <span className="text-xs text-slate-400">Job Payout</span>
-                    <p className="text-xl font-black text-emerald-400">
-                      ${Number(activeJob.price).toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Destination & Coordinates */}
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30">
-                        <Navigation className="h-4 w-4" />
-                      </div>
+            ) : activeJobs.length > 0 ? (
+              <div className="space-y-6">
+                {activeJobs.map((job) => (
+                  <div key={job.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-6 shadow-xl">
+                    <div className="flex items-start justify-between border-b border-slate-800 pb-4">
                       <div>
-                        <p className="text-xs font-semibold text-slate-200">Customer Destination</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{activeJob.address}</p>
-                        <p className="font-mono text-[11px] text-emerald-400 mt-1">
-                          Coordinates: {Number(activeJob.latitude || activeJob.lat || 37.7749).toFixed(4)}° N, {Number(activeJob.longitude || activeJob.lng || -122.4194).toFixed(4)}° W
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/20">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                          Order #{job.id.slice(0, 8)} • Status: {job.status.toUpperCase()}
+                        </div>
+                        <h2 className="mt-2 text-lg font-bold text-white">{job.service_type || job.services?.name}</h2>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Customer: {job.customer?.full_name || "Homeowner"} • {job.customer?.phone || job.customer?.mobile || "No phone listed"}
                         </p>
                       </div>
+
+                      <div className="text-right">
+                        <span className="text-xs text-slate-400">Job Payout</span>
+                        <p className="text-xl font-black text-emerald-400">
+                          ${Number(job.price).toFixed(2)}
+                        </p>
+                        <Link
+                          href={`/jobs/${job.id}`}
+                          className="mt-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1 transition"
+                        >
+                          <span>Execution View</span>
+                          <ChevronRight className="h-3 w-3" />
+                        </Link>
+                      </div>
                     </div>
 
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${activeJob.latitude || activeJob.lat || 37.7749},${activeJob.longitude || activeJob.lng || -122.4194}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-500 transition shadow-sm shrink-0"
-                    >
-                      <span>Open Navigation</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
+                    {/* Destination & Coordinates */}
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30">
+                            <Navigation className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-slate-200">Customer Destination</p>
+                            <p className="text-xs text-slate-400 mt-0.5">{job.address}</p>
+                            <p className="font-mono text-[11px] text-emerald-400 mt-1">
+                              Coordinates: {Number(job.latitude || job.lat || 37.7749).toFixed(4)}° N, {Number(job.longitude || job.lng || -122.4194).toFixed(4)}° W
+                            </p>
+                          </div>
+                        </div>
 
-                  {activeJob.notes && (
-                    <div className="mt-3 border-t border-slate-800/80 pt-2 text-xs text-slate-300">
-                      <strong>Customer Notes:</strong> {activeJob.notes}
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${job.latitude || job.lat || 37.7749},${job.longitude || job.lng || -122.4194}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-500 transition shadow-sm shrink-0"
+                        >
+                          <span>Open Navigation</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+
+                      {job.notes && (
+                        <div className="mt-3 border-t border-slate-800/80 pt-2 text-xs text-slate-300">
+                          <strong>Customer Notes:</strong> {job.notes}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Status Progression Controls (4-step stepper including arrived) */}
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold text-slate-300">Advance Job Lifecycle Status:</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      onClick={() => handleUpdateStatus("en_route")}
-                      disabled={actionLoading !== null || activeJob.status === "en_route"}
-                      className={`rounded-xl py-2.5 text-xs font-bold transition border ${
-                        activeJob.status === "en_route"
-                          ? "bg-blue-600 border-blue-500 text-white"
-                          : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      1. En Route
-                    </button>
-                    <button
-                      onClick={() => handleUpdateStatus("arrived")}
-                      disabled={actionLoading !== null || activeJob.status === "arrived"}
-                      className={`rounded-xl py-2.5 text-xs font-bold transition border ${
-                        activeJob.status === "arrived"
-                          ? "bg-indigo-600 border-indigo-500 text-white"
-                          : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      2. Arrived
-                    </button>
-                    <button
-                      onClick={() => handleUpdateStatus("in_progress")}
-                      disabled={actionLoading !== null || activeJob.status === "in_progress"}
-                      className={`rounded-xl py-2.5 text-xs font-bold transition border ${
-                        activeJob.status === "in_progress"
-                          ? "bg-amber-600 border-amber-500 text-white"
-                          : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      3. In Progress
-                    </button>
-                    <button
-                      onClick={() => setShowProofModal(true)}
-                      disabled={actionLoading !== null}
-                      className="rounded-xl py-2.5 text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 transition shadow-lg shadow-emerald-950 flex items-center justify-center gap-1.5"
-                    >
-                      <Camera className="h-3.5 w-3.5" />
-                      <span>4. Complete Proof</span>
-                    </button>
+                    {/* Add-ons & Mid-Job Upsell Section */}
+                    {(() => {
+                      const jobAddons = jobAddonsMap[job.id] || [];
+                      const pendingAddons = jobAddons.filter((a) => a.status === "pending");
+                      const approvedAddons = jobAddons.filter((a) => a.status === "approved");
+                      const hasPending = pendingAddons.length > 0;
+
+                      return (
+                        <div className="space-y-3 border-t border-slate-800/80 pt-3">
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/70 border border-slate-800">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="h-4 w-4 text-emerald-400" />
+                              <span className="text-xs font-semibold text-slate-200">
+                                Mid-Job Add-ons: {jobAddons.length} item{jobAddons.length === 1 ? "" : "s"}
+                                {approvedAddons.length > 0 && ` (${approvedAddons.length} approved)`}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddonDrawerJob(job);
+                                setShowAddonDrawer(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>Suggest Add-on / Part</span>
+                            </button>
+                          </div>
+
+                          {hasPending && (
+                            <div className="p-3 rounded-xl bg-amber-950/50 border border-amber-800/70 text-xs text-amber-300 flex items-center gap-2">
+                              <Clock className="h-4 w-4 shrink-0 text-amber-400 animate-pulse" />
+                              <span>
+                                <strong>Pending Customer Approval:</strong> {pendingAddons.length} add-on is awaiting customer decision. "Complete Job" is locked until resolved.
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Status Progression Controls (4-step stepper including arrived) */}
+                          <div className="space-y-3 pt-1">
+                            <p className="text-xs font-semibold text-slate-300">Advance Job Lifecycle Status:</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <button
+                                onClick={() => handleUpdateStatus(job.id, "en_route")}
+                                disabled={actionLoading !== null || job.status === "en_route"}
+                                className={`rounded-xl py-2.5 text-xs font-bold transition border ${
+                                  job.status === "en_route"
+                                    ? "bg-blue-600 border-blue-500 text-white"
+                                    : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
+                                }`}
+                              >
+                                1. En Route
+                              </button>
+                              <button
+                                onClick={() => handleUpdateStatus(job.id, "arrived")}
+                                disabled={actionLoading !== null || job.status === "arrived"}
+                                className={`rounded-xl py-2.5 text-xs font-bold transition border ${
+                                  job.status === "arrived"
+                                    ? "bg-indigo-600 border-indigo-500 text-white"
+                                    : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
+                                }`}
+                              >
+                                2. Arrived
+                              </button>
+                              <button
+                                onClick={() => handleUpdateStatus(job.id, "in_progress")}
+                                disabled={actionLoading !== null || job.status === "in_progress"}
+                                className={`rounded-xl py-2.5 text-xs font-bold transition border ${
+                                  job.status === "in_progress"
+                                    ? "bg-amber-600 border-amber-500 text-white"
+                                    : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
+                                }`}
+                              >
+                                3. In Progress
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (hasPending) {
+                                    setFeedbackMessage(
+                                      "Cannot complete job: Add-on proposal is still pending customer approval."
+                                    );
+                                    return;
+                                  }
+                                  setActiveJob(job);
+                                  setShowProofModal(true);
+                                }}
+                                disabled={actionLoading !== null || hasPending}
+                                title={
+                                  hasPending
+                                    ? "Cannot complete: Add-on pending customer approval"
+                                    : "Upload proof and finalize job"
+                                }
+                                className={`rounded-xl py-2.5 text-xs font-bold transition shadow-lg flex items-center justify-center gap-1.5 ${
+                                  hasPending
+                                    ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+                                    : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-950"
+                                }`}
+                              >
+                                <Camera className="h-3.5 w-3.5" />
+                                <span>4. Complete Proof</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
-                </div>
+                ))}
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-800 p-12 text-center text-xs text-slate-400">
@@ -657,6 +843,17 @@ export default function ProfessionalPortal() {
           setShowRateModal(true);
           loadData();
         }}
+      />
+
+      {/* Mid-Job Add-on / Part Upsell Drawer */}
+      <AddServicePartDrawer
+        isOpen={showAddonDrawer}
+        booking={addonDrawerJob}
+        onClose={() => {
+          setShowAddonDrawer(false);
+          setAddonDrawerJob(null);
+        }}
+        onAddonCreated={loadData}
       />
 
       {/* Two-Way Rate Customer Modal */}

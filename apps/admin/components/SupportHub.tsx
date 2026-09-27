@@ -24,6 +24,7 @@ import {
   fetchTicketThread,
   createTicketReply,
   updateTicketStatusAdmin,
+  markTicketAsRead,
 } from "@repo/db";
 
 export function SupportHub() {
@@ -62,6 +63,7 @@ export function SupportHub() {
       setSelectedTicketId(ticketId);
       const thread = await fetchTicketThread(ticketId, supabase);
       setActiveThread(thread);
+      markTicketAsRead(ticketId, supabase).catch(() => {});
     } catch (err: any) {
       console.error("Error loading ticket thread:", err);
       setMessage({ type: "error", text: "Failed to load ticket thread." });

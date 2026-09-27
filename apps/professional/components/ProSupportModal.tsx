@@ -7,6 +7,7 @@ import {
   fetchTicketThread,
   createSupportTicket,
   createTicketReply,
+  markTicketAsRead,
 } from "@repo/db";
 import {
   LifeBuoy,
@@ -79,6 +80,7 @@ export function ProSupportModal({ isOpen, onClose }: ProSupportModalProps) {
       setError(null);
       const data = await fetchTicketThread(ticketId, supabase);
       setThreadData(data);
+      markTicketAsRead(ticketId, supabase).catch(() => {});
     } catch (err: any) {
       setError(err.message || "Failed to load ticket thread.");
     } finally {

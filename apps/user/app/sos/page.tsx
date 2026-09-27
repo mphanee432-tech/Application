@@ -28,7 +28,7 @@ import {
 
 export default function UserSosPage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const [supabase] = useState(() => createBrowserSupabaseClient());
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -64,16 +64,42 @@ export default function UserSosPage() {
         (err) => {
           console.warn("Geolocation error:", err.message);
           setGeoError("Could not auto-detect browser GPS. Using default location coordinates.");
-          setCoords({ lat: 40.7128, lng: -74.006 }); // Fallback NYC
+          setCoords({ lat: 37.7749, lng: -122.4194 });
           setDetectingLocation(false);
         },
         { enableHighAccuracy: true, timeout: 8000 }
       );
     } else {
       setGeoError("Browser does not support geolocation. Default coordinates applied.");
-      setCoords({ lat: 40.7128, lng: -74.006 });
+      setCoords({ lat: 37.7749, lng: -122.4194 });
       setDetectingLocation(false);
     }
+  };
+
+  const getFreshGpsCoordinates = async (): Promise<{ lat: number; lng: number }> => {
+    if (typeof window !== "undefined" && navigator.geolocation) {
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 0,
+          });
+        });
+        const fresh = {
+          lat: Number(position.coords.latitude.toFixed(6)),
+          lng: Number(position.coords.longitude.toFixed(6)),
+        };
+        setCoords(fresh);
+        return fresh;
+      } catch (err: any) {
+        console.warn("Could not capture fresh GPS, falling back to state:", err?.message);
+      }
+    }
+    if (coords && coords.lat && coords.lng) {
+      return coords;
+    }
+    return { lat: 37.7749, lng: -122.4194 };
   };
 
   const loadAlerts = async () => {
@@ -87,11 +113,13 @@ export default function UserSosPage() {
 
   useEffect(() => {
     let channel: any = null;
+    let isMounted = true;
 
     async function init() {
       try {
         setLoading(true);
         const currentUser = await getCurrentUser(supabase);
+        if (!isMounted) return;
         if (!currentUser) {
           router.push("/login?redirect=/sos");
           return;
@@ -104,6 +132,7 @@ export default function UserSosPage() {
           fetchCustomerBookings(supabase),
           fetchUserSosAlerts(supabase),
         ]);
+        if (!isMounted) return;
 
         const inProgress = bookings.filter((b) =>
           ["accepted", "en_route", "in_progress"].includes(b.status)
@@ -114,9 +143,10 @@ export default function UserSosPage() {
         }
         setSosAlerts(alerts);
 
-        // Realtime subscription for SOS alerts
+        // Realtime subscription for SOS alerts - chained before subscribe
+        const channelName = `user-sos-${currentUser.id}-${Date.now()}`;
         channel = supabase
-          .channel(`user-sos-${currentUser.id}`)
+          .channel(channelName)
           .on(
             "postgres_changes",
             {
@@ -125,39 +155,42 @@ export default function UserSosPage() {
               table: "sos_alerts",
               filter: `creator_id=eq.${currentUser.id}`,
             },
-            () => loadAlerts()
+            () => {
+              if (isMounted) loadAlerts();
+            }
           )
           .subscribe();
       } catch (err) {
         console.error("SOS page init error:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
     init();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      isMounted = false;
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 
   const handleTriggerSos = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!coords) {
-      setTriggerError("GPS coordinates are required to send an emergency dispatch beacon.");
-      return;
-    }
-
     try {
       setSubmitting(true);
       setTriggerError(null);
       setTriggerSuccess(null);
 
+      // Acquire fresh live GPS coordinates at the moment of distress
+      const liveCoords = await getFreshGpsCoordinates();
+
       const alert = await createSosAlert(
         {
-          lat: coords.lat,
-          lng: coords.lng,
+          lat: liveCoords.lat,
+          lng: liveCoords.lng,
           reason: notes.trim() ? `${reason}: ${notes.trim()}` : reason,
           bookingId: selectedBookingId || undefined,
           creatorRole: "user",
