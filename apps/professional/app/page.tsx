@@ -71,6 +71,7 @@ export default function ProfessionalPortal() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Modals state
   const [showKycModal, setShowKycModal] = useState(false);
@@ -423,6 +424,25 @@ export default function ProfessionalPortal() {
                   <span className="hidden sm:inline">SOS</span>
                 </Link>
 
+                {/* Soft Refresh Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRefreshing(true);
+                    router.refresh();
+                    loadData().finally(() => setRefreshing(false));
+                  }}
+                  disabled={refreshing}
+                  className="p-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+                  title="Soft Refresh Data"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 text-slate-400 hover:text-white transition-transform ${
+                      refreshing ? "animate-spin text-emerald-400" : ""
+                    }`}
+                  />
+                </button>
+
                 {/* Profile Modal Trigger */}
                 <button
                   onClick={() => setShowProfileModal(true)}
@@ -564,9 +584,27 @@ export default function ProfessionalPortal() {
                           Order #{job.id.slice(0, 8)} • Status: {job.status.toUpperCase()}
                         </div>
                         <h2 className="mt-2 text-lg font-bold text-white">{job.service_type || job.services?.name}</h2>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Customer: {job.customer?.full_name || "Homeowner"} • {job.customer?.phone || job.customer?.mobile || "No phone listed"}
-                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700/80 text-xs">
+                            <User className="h-3.5 w-3.5 text-blue-400" />
+                            <span className="font-bold text-white">
+                              {job.customer?.full_name || "Homeowner"}
+                            </span>
+                          </div>
+                          {(job.customer?.phone || job.customer?.mobile) && (
+                            <span className="text-xs text-slate-400 font-mono">
+                              📞 {job.customer?.phone || job.customer?.mobile}
+                            </span>
+                          )}
+                        </div>
+                        {job.scheduled_date && (
+                          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-300 font-medium">
+                            <Calendar className="h-3 w-3 text-amber-400" />
+                            <span>
+                              Scheduled: {new Date(job.scheduled_date).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-right">

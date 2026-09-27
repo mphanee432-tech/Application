@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   createBrowserSupabaseClient,
   fetchActiveCities,
@@ -22,6 +23,7 @@ import { RateProfessionalModal } from "../components/RateProfessionalModal";
 import { AddressBookModal } from "../components/AddressBookModal";
 import { SupportTicketModal } from "../components/SupportTicketModal";
 import { UserProfileModal } from "../components/UserProfileModal";
+import { WalletPaymentModal } from "../components/WalletPaymentModal";
 import {
   MapPin,
   Wrench,
@@ -42,6 +44,7 @@ import {
   Wallet,
   ShieldAlert,
   MessageSquare,
+  RefreshCw,
 } from "lucide-react";
 
 // Dynamically import Draggable Map to disable SSR for Leaflet
@@ -58,6 +61,7 @@ const DraggableAddressMap = dynamic(
 );
 
 export default function UserPortal() {
+  const router = useRouter();
   const [supabase] = useState(() => createBrowserSupabaseClient());
 
   // Dynamic catalog state
@@ -71,6 +75,11 @@ export default function UserPortal() {
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+
+  // Wallet Checkout Modal & Soft Refresh state
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [checkoutPayload, setCheckoutPayload] = useState<any | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Location & Form state
   const [pinCoords, setPinCoords] = useState<{ lat: number; lng: number }>({
@@ -300,7 +309,6 @@ export default function UserPortal() {
     }
 
     try {
-      setSubmitting(true);
       setMessage(null);
 
       // Save to customer_addresses if requested
@@ -322,33 +330,34 @@ export default function UserPortal() {
         }
       }
 
-      // Create booking row using city-specific price!
-      const newBooking = await createBookingWithLocation(
-        {
-          cityId: selectedCity.id,
-          serviceId: selectedService.id,
-          serviceType: selectedService.name,
-          latitude: pinCoords.lat,
-          longitude: pinCoords.lng,
-          address: `${addressText}, ${selectedCity.name}`,
-          price: Number(selectedService.base_price),
-          notes: jobNotes,
-        },
-        supabase
-      );
-
-      setActiveBookings((prev) => [newBooking, ...prev]);
-      setActiveBooking(newBooking);
-      setMessage({ type: "success", text: "Job broadcast created! Searching for nearby professionals..." });
-
-      // Refresh list
-      const updated = await fetchCustomerBookings(supabase);
-      setUserBookings(updated);
+      // Open Wallet Payment & Checkout Gateway Modal
+      setCheckoutPayload({
+        cityId: selectedCity.id,
+        serviceId: selectedService.id,
+        serviceType: selectedService.name,
+        latitude: pinCoords.lat,
+        longitude: pinCoords.lng,
+        address: `${addressText}, ${selectedCity.name}`,
+        price: Number(selectedService.base_price),
+        notes: jobNotes,
+      });
+      setShowPaymentModal(true);
     } catch (err: any) {
-      setMessage({ type: "error", text: err.message || "Failed to create booking" });
-    } finally {
-      setSubmitting(false);
+      setMessage({ type: "error", text: err.message || "Failed to prepare booking payment" });
     }
+  };
+
+  const handlePaymentSuccess = async (newBooking: any) => {
+    setActiveBookings((prev) => [newBooking, ...prev]);
+    setActiveBooking(newBooking);
+    setMessage({
+      type: "success",
+      text: "Payment confirmed with in-app Demo Wallet! Job broadcast dispatched to specialists.",
+    });
+
+    // Refresh list
+    const updated = await fetchCustomerBookings(supabase);
+    setUserBookings(updated);
   };
 
   const handleSignOut = async () => {
@@ -441,6 +450,25 @@ export default function UserPortal() {
                   <ShieldAlert className="h-4 w-4 text-rose-400" />
                   <span className="hidden sm:inline">SOS</span>
                 </Link>
+
+                {/* Soft Refresh Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRefreshing(true);
+                    router.refresh();
+                    loadInitialData().finally(() => setRefreshing(false));
+                  }}
+                  disabled={refreshing}
+                  className="p-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+                  title="Soft Refresh Data"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 text-slate-400 hover:text-white transition-transform ${
+                      refreshing ? "animate-spin text-blue-400" : ""
+                    }`}
+                  />
+                </button>
               </div>
             )}
 
@@ -1041,6 +1069,14 @@ export default function UserPortal() {
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}
         onProfileUpdated={loadInitialData}
+      />
+
+      {/* Wallet Payment Gateway Checkout Modal */}
+      <WalletPaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        bookingData={checkoutPayload}
+        onSuccess={handlePaymentSuccess}
       />
     </div>
   );

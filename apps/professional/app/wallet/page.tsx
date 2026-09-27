@@ -43,6 +43,7 @@ export default function ProfessionalWalletPage() {
   const [requestingPayout, setRequestingPayout] = useState(false);
   const [payoutSuccess, setPayoutSuccess] = useState<string | null>(null);
   const [payoutError, setPayoutError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadData = async (userId: string) => {
     try {
@@ -184,7 +185,25 @@ export default function ProfessionalWalletPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <button
+              type="button"
+              onClick={() => {
+                if (!user) return;
+                setRefreshing(true);
+                router.refresh();
+                loadData(user.id).finally(() => setRefreshing(false));
+              }}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+              title="Soft Refresh Wallet"
+            >
+              <RefreshCw
+                className={`h-4 w-4 text-slate-400 hover:text-white transition-transform ${
+                  refreshing ? "animate-spin text-emerald-400" : ""
+                }`}
+              />
+            </button>
             <span>{user?.email}</span>
           </div>
         </div>

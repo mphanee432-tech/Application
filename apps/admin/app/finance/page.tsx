@@ -52,6 +52,7 @@ export default function AdminFinancePage() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadFinanceData = async () => {
     try {
@@ -118,7 +119,7 @@ export default function AdminFinancePage() {
 
       const res = await approvePayoutAdminAction(txId);
       if (res && res.success) {
-        setActionSuccess(`Payout #${txId.slice(0, 8)} approved and cleared successfully!`);
+        setActionSuccess(res.message || "Mock Bank Transfer Successful! Payout disbursed.");
         await loadFinanceData();
       } else {
         setActionError(res?.error || "Failed to approve payout");
@@ -186,7 +187,24 @@ export default function AdminFinancePage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <button
+              type="button"
+              onClick={() => {
+                setRefreshing(true);
+                router.refresh();
+                loadFinanceData().finally(() => setRefreshing(false));
+              }}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+              title="Soft Refresh Ledger"
+            >
+              <RefreshCw
+                className={`h-4 w-4 text-slate-400 hover:text-white transition-transform ${
+                  refreshing ? "animate-spin text-indigo-400" : ""
+                }`}
+              />
+            </button>
             <span>{user?.email} (Super Admin)</span>
           </div>
         </div>
@@ -312,7 +330,7 @@ export default function AdminFinancePage() {
                       {approvingId === tx.id ? (
                         <>
                           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                          <span>Approving...</span>
+                          <span>Simulating Bank Transfer...</span>
                         </>
                       ) : (
                         <>

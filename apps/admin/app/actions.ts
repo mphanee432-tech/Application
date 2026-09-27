@@ -134,6 +134,7 @@ export async function approvePayoutAdminAction(transactionId: string) {
     return {
       success: !!result.success,
       data: result.data || transactionId,
+      message: result.message || "Mock Bank Transfer Successful",
       error: result.error || undefined,
     };
   } catch (err: any) {

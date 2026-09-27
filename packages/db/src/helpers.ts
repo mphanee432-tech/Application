@@ -274,6 +274,7 @@ export async function fetchActiveJobsForPro(
       .select("*, customer:profiles!bookings_customer_id_fkey(full_name, phone, email), services(name, description, base_price, icon)")
       .eq("professional_id", user.id)
       .in("status", ["accepted", "en_route", "arrived", "in_progress"])
+      .order("scheduled_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -672,10 +673,79 @@ export async function finalizeJobWithProof(
       updated_at: new Date().toISOString(),
     })
     .eq("id", bookingId)
-    .select()
+    .select("*, services(name)")
     .single();
 
   if (error) throw error;
+
+  // Process Automated Financial Split (85% pro, 15% platform commission)
+  try {
+    if (data?.professional_id) {
+      // 1. Fetch approved add-ons
+      const { data: addons } = await client
+        .from("job_addons")
+        .select("cost")
+        .eq("booking_id", bookingId)
+        .eq("status", "approved");
+
+      const addonsTotal = (addons || []).reduce((sum: number, a: any) => sum + Number(a.cost || 0), 0);
+      const totalAmount = Number(data.price || 0) + addonsTotal;
+
+      if (totalAmount > 0) {
+        const platformFee = Math.round(totalAmount * 0.15 * 100) / 100;
+        const netEarnings = Math.round((totalAmount - platformFee) * 100) / 100;
+
+        // Fetch pro wallet
+        const proWallet = await fetchUserWallet(data.professional_id, client);
+        const newBalance = Number(proWallet.balance) + netEarnings;
+
+        // Credit pro wallet
+        await client
+          .from("wallets")
+          .update({
+            balance: newBalance,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", proWallet.id);
+
+        // Insert transaction for pro net earnings
+        await client.from("transactions").insert({
+          wallet_id: proWallet.id,
+          user_id: data.professional_id,
+          booking_id: bookingId,
+          type: "booking_payment",
+          amount: netEarnings,
+          status: "completed",
+          description: `Net earnings for ${data.services?.name || "Service"} (Order #${bookingId.slice(0, 8)}) - 85% payout`,
+          metadata: {
+            total_amount: totalAmount,
+            platform_fee: platformFee,
+            net_earnings: netEarnings,
+            addons_included: addonsTotal,
+          },
+        });
+
+        // Insert transaction for platform commission
+        await client.from("transactions").insert({
+          wallet_id: proWallet.id,
+          user_id: data.professional_id,
+          booking_id: bookingId,
+          type: "platform_fee",
+          amount: platformFee,
+          status: "completed",
+          description: `Platform Commission (15%) for Order #${bookingId.slice(0, 8)}`,
+          metadata: {
+            total_amount: totalAmount,
+            platform_fee: platformFee,
+            fee_percentage: 15,
+          },
+        });
+      }
+    }
+  } catch (finErr) {
+    console.warn("Automated financial split non-fatal warning:", finErr);
+  }
+
   return data;
 }
 
@@ -1221,7 +1291,7 @@ export async function fetchAllCustomersAdmin(
     const client = (customClient ?? createBrowserSupabaseClient()) as any;
     const { data: customerProfiles, error: profileErr } = await client
       .from("profiles")
-      .select("*, bookings(id, price, status, created_at)")
+      .select("*, bookings:bookings!bookings_customer_id_fkey(id, price, status, created_at)")
       .in("role", ["customer", "user"])
       .order("created_at", { ascending: false });
 
@@ -1427,8 +1497,8 @@ export async function fetchUserWallet(
     .from("wallets")
     .insert({
       user_id: targetId,
-      balance: 50.00,
-      promo_credits: 25.00,
+      balance: 1000.00,
+      promo_credits: 50.00,
       currency: "USD",
     })
     .select()
@@ -1703,6 +1773,7 @@ export async function requestPayoutPro(
 export interface ApprovePayoutResult {
   success: boolean;
   data?: string;
+  message?: string;
   error?: string;
 }
 
@@ -1712,11 +1783,19 @@ export async function approvePayoutAdmin(
 ): Promise<ApprovePayoutResult> {
   try {
     const client = (customClient ?? createBrowserSupabaseClient()) as any;
+
+    // Simulate 2-second bank transfer processing delay for realism
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     const { data, error } = await client
       .from("transactions")
       .update({
         status: "completed",
-        metadata: { approved_at: new Date().toISOString() },
+        metadata: {
+          approved_at: new Date().toISOString(),
+          payout_disbursed: true,
+          channel: "mock_automated_clearing_house",
+        },
       })
       .eq("id", transactionId)
       .select("id");
@@ -1730,7 +1809,11 @@ export async function approvePayoutAdmin(
       return { success: false, error: "Transaction not found or could not be updated." };
     }
 
-    return { success: true, data: data[0]?.id || transactionId };
+    return {
+      success: true,
+      data: data[0]?.id || transactionId,
+      message: "Mock Bank Transfer Successful",
+    };
   } catch (err: any) {
     console.error("approvePayoutAdmin unexpected error:", err?.message || err);
     return {
@@ -2809,6 +2892,111 @@ export async function markTicketAsRead(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || "Failed marking ticket as read" };
+  }
+}
+
+/* ==========================================================================
+   SIMULATED WALLET CHECKOUT & DEMO TOP-UP
+   ========================================================================== */
+
+export async function topUpDemoBalance(
+  amount: number = 500,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; newBalance?: number; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) return { success: false, error: "Authentication required." };
+
+    const wallet = await fetchUserWallet(user.id, client);
+    const newBalance = Number(wallet.balance) + amount;
+
+    const { error: wErr } = await client
+      .from("wallets")
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq("id", wallet.id);
+
+    if (wErr) return { success: false, error: wErr.message };
+
+    await client.from("transactions").insert({
+      wallet_id: wallet.id,
+      user_id: user.id,
+      type: "deposit",
+      amount: amount,
+      status: "completed",
+      description: `Demo Balance Top-Up (+$${amount.toFixed(2)})`,
+      metadata: { method: "demo_top_up", added_at: new Date().toISOString() },
+    });
+
+    return { success: true, newBalance };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to top up balance" };
+  }
+}
+
+export async function processWalletPayment(
+  bookingPayload: {
+    cityId: string;
+    serviceId: string;
+    serviceType: string;
+    latitude: number;
+    longitude: number;
+    address: string;
+    price: number;
+    notes?: string;
+  },
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; booking?: any; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) return { success: false, error: "Authentication required to confirm payment." };
+
+    const wallet = await fetchUserWallet(user.id, client);
+    const price = Number(bookingPayload.price);
+    const currentBalance = Number(wallet.balance);
+
+    if (currentBalance < price) {
+      return {
+        success: false,
+        error: `Insufficient wallet balance ($${currentBalance.toFixed(2)}) for order ($${price.toFixed(2)}). Please top up.`,
+      };
+    }
+
+    // 1. Deduct funds from customer wallet
+    const newBalance = currentBalance - price;
+    const { error: wErr } = await client
+      .from("wallets")
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq("id", wallet.id);
+
+    if (wErr) {
+      return { success: false, error: `Failed to deduct balance: ${wErr.message}` };
+    }
+
+    // 2. Insert booking with status 'pending'
+    const newBooking = await createBookingWithLocation(bookingPayload, client);
+
+    // 3. Insert transaction record
+    await client.from("transactions").insert({
+      wallet_id: wallet.id,
+      user_id: user.id,
+      booking_id: newBooking.id,
+      type: "booking_payment",
+      amount: price,
+      status: "completed",
+      description: `Payment for ${bookingPayload.serviceType} (Order #${newBooking.id.slice(0, 8)})`,
+      metadata: {
+        service_id: bookingPayload.serviceId,
+        service_name: bookingPayload.serviceType,
+        paid_at: new Date().toISOString(),
+      },
+    });
+
+    return { success: true, booking: newBooking };
+  } catch (err: any) {
+    console.error("processWalletPayment error:", err);
+    return { success: false, error: err?.message || "Failed to process wallet payment." };
   }
 }
 

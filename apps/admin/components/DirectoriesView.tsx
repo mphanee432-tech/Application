@@ -17,7 +17,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import {
-  approveProfessionalKyc,
   fetchAllCustomersAdmin,
   fetchAllProfessionalsAdmin,
 } from "../app/actions";
@@ -29,7 +28,6 @@ export function DirectoriesView() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [kycFilter, setKycFilter] = useState<string>("all");
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const loadDirectories = async () => {
@@ -60,19 +58,6 @@ export function DirectoriesView() {
   useEffect(() => {
     loadDirectories();
   }, []);
-
-  const handleApprovePro = async (proId: string) => {
-    try {
-      setActionLoading(proId);
-      await approveProfessionalKyc(proId);
-      setMessage({ type: "success", text: `Professional #${proId.slice(0, 8)} KYC verified & approved!` });
-      await loadDirectories();
-    } catch (err: any) {
-      setMessage({ type: "error", text: err.message || "Failed to approve professional." });
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   // Filtered lists
   const safeCustomers = Array.isArray(customers) ? customers : [];
@@ -299,8 +284,7 @@ export function DirectoriesView() {
                     <th className="pb-3 font-semibold">Contact (Email & Mobile)</th>
                     <th className="pb-3 font-semibold">City Zone</th>
                     <th className="pb-3 font-semibold">Rating</th>
-                    <th className="pb-3 font-semibold">KYC Compliance</th>
-                    <th className="pb-3 text-right font-semibold">KYC Action</th>
+                    <th className="pb-3 text-right font-semibold">KYC Compliance</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -351,7 +335,7 @@ export function DirectoriesView() {
                             <span>{pro.rating ? Number(pro.rating).toFixed(1) : "5.0"}</span>
                           </div>
                         </td>
-                        <td className="py-4">
+                        <td className="py-4 text-right">
                           <span
                             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${
                               pro.kyc_status === "approved" || pro.status === "approved"
@@ -368,22 +352,6 @@ export function DirectoriesView() {
                             )}
                             <span>{pro.kyc_status?.replace("_", " ") || pro.status}</span>
                           </span>
-                        </td>
-                        <td className="py-4 text-right">
-                          {pro.kyc_status !== "approved" && pro.status !== "approved" ? (
-                            <button
-                              onClick={() => handleApprovePro(pro.id)}
-                              disabled={actionLoading === pro.id}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-sm transition"
-                            >
-                              {actionLoading === pro.id ? "Approving..." : "Approve KYC"}
-                            </button>
-                          ) : (
-                            <span className="text-emerald-400 font-semibold text-xs flex items-center justify-end gap-1">
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                              <span>Active Provider</span>
-                            </span>
-                          )}
                         </td>
                       </tr>
                     );

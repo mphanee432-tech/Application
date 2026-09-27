@@ -62,6 +62,7 @@ export default function AdminPortal() {
   // Realtime badge counts
   const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -185,6 +186,24 @@ export default function AdminPortal() {
               <Megaphone className="h-3.5 w-3.5 text-indigo-400" />
               <span className="hidden sm:inline">Broadcasts</span>
             </Link>
+
+            <button
+              type="button"
+              onClick={() => {
+                setRefreshing(true);
+                router.refresh();
+                loadData().finally(() => setRefreshing(false));
+              }}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+              title="Soft Refresh Admin Portal"
+            >
+              <RefreshCw
+                className={`h-4 w-4 text-slate-400 hover:text-white transition-transform ${
+                  refreshing ? "animate-spin text-indigo-400" : ""
+                }`}
+              />
+            </button>
 
             {user ? (
               <div className="flex items-center gap-2">

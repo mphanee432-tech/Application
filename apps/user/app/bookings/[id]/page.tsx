@@ -10,6 +10,7 @@ import {
   getCurrentUser,
   fetchBookingDetails,
   fetchBookingReview,
+  fetchBookingAddons,
   type Tables,
 } from "@repo/db";
 import {
@@ -32,9 +33,11 @@ import {
   User,
   AlertCircle,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 import { RateProfessionalModal } from "../../../components/RateProfessionalModal";
 import CancelRescheduleModal from "../../../components/CancelRescheduleModal";
+import { AddonApprovalModal } from "../../../components/AddonApprovalModal";
 
 export default function CustomerBookingDrillDownPage() {
   const params = useParams();
@@ -47,22 +50,46 @@ export default function CustomerBookingDrillDownPage() {
   const [review, setReview] = useState<Tables<"reviews"> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [addons, setAddons] = useState<any[]>([]);
+  const [pendingAddonToReview, setPendingAddonToReview] = useState<any | null>(null);
 
   // Modals
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const approvedAddons = addons.filter((a) => a.status === "approved");
+  const pendingAddons = addons.filter((a) => a.status === "pending");
+  const declinedAddons = addons.filter((a) => a.status === "declined");
+  const approvedAddonsTotal = approvedAddons.reduce(
+    (sum, a) => sum + Number(a.cost || 0),
+    0
+  );
+  const totalInvoiced = Number(booking?.price || 0) + approvedAddonsTotal;
+
   const loadData = async () => {
     if (!bookingId) return;
     try {
       setError(null);
-      const data = await fetchBookingDetails(bookingId, supabase);
+      const [data, bookingAddons] = await Promise.all([
+        fetchBookingDetails(bookingId, supabase),
+        fetchBookingAddons(bookingId, supabase),
+      ]);
+
       if (!data) {
         setError("Booking not found or could not be loaded.");
         return;
       }
       setBooking(data);
+      const addonsList = Array.isArray(bookingAddons)
+        ? bookingAddons
+        : (bookingAddons?.success && Array.isArray(bookingAddons?.data) ? bookingAddons.data : []);
+      setAddons(addonsList);
+
+      const pending = addonsList.find((a: any) => a.status === "pending");
+      if (pending) {
+        setPendingAddonToReview(pending);
+      }
 
       if (data.status === "completed") {
         const rev = await fetchBookingReview(bookingId, supabase);
@@ -92,7 +119,7 @@ export default function CustomerBookingDrillDownPage() {
         await loadData();
         if (!isMounted) return;
 
-        // Setup real-time listener for this booking
+        // Setup real-time listener for this booking and its add-ons
         const channelName = `booking-live-${bookingId}-${Date.now()}`;
         channel = supabase
           .channel(channelName)
@@ -106,6 +133,22 @@ export default function CustomerBookingDrillDownPage() {
             },
             () => {
               if (isMounted) loadData();
+            }
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "job_addons",
+              filter: `booking_id=eq.${bookingId}`,
+            },
+            (payload: any) => {
+              if (!isMounted) return;
+              if (payload.new && payload.new.status === "pending") {
+                setPendingAddonToReview(payload.new);
+              }
+              loadData();
             }
           )
           .subscribe();
@@ -415,11 +458,59 @@ export default function CustomerBookingDrillDownPage() {
                 </span>
               </div>
               <div className="py-2.5 flex justify-between items-center">
-                <span className="text-slate-400">Total Price</span>
-                <span className="font-mono text-emerald-400 font-bold text-sm">
+                <span className="text-slate-400">Base Service Price</span>
+                <span className="font-mono text-slate-200 font-semibold text-xs">
                   ${Number(booking.price || 0).toFixed(2)}
                 </span>
               </div>
+              {approvedAddons.map((addon) => (
+                <div key={addon.id} className="py-2 flex justify-between items-center text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-emerald-400 font-bold">＋</span>
+                    <span className="text-slate-300 font-medium">
+                      {addon.custom_description || addon.service?.name || "Service Add-on"}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                      Approved
+                    </span>
+                  </div>
+                  <span className="font-mono text-emerald-400 font-semibold">
+                    +${Number(addon.cost || 0).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+              <div className="py-2.5 flex justify-between items-center border-t border-slate-800">
+                <span className="text-slate-200 font-bold">Total Invoiced Amount</span>
+                <span className="font-mono text-emerald-400 font-bold text-sm">
+                  ${totalInvoiced.toFixed(2)}
+                </span>
+              </div>
+              {pendingAddons.length > 0 && (
+                <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-300">
+                        {pendingAddons.length} In-Job Add-on{pendingAddons.length > 1 ? "s" : ""} Requested
+                      </p>
+                      <p className="text-[10px] text-amber-200/80">
+                        Technician requested extra parts/labor. Review and approve to proceed.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPendingAddonToReview(pendingAddons[0])}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition shrink-0"
+                  >
+                    Review
+                  </button>
+                </div>
+              )}
+              {declinedAddons.length > 0 && (
+                <div className="py-2 text-[11px] text-slate-500 italic">
+                  Note: {declinedAddons.length} suggested add-on{declinedAddons.length > 1 ? "s were" : " was"} declined and not billed.
+                </div>
+              )}
               {booking.scheduled_date && (
                 <div className="py-2.5 flex justify-between items-center">
                   <span className="text-slate-400">Scheduled Date / Slot</span>
@@ -581,6 +672,17 @@ export default function CustomerBookingDrillDownPage() {
         onSuccess={() => {
           setShowCancelModal(false);
           setFeedback({ type: "success", text: "Booking modified / cancelled successfully." });
+          loadData();
+        }}
+      />
+
+      {/* Add-on Approval Modal */}
+      <AddonApprovalModal
+        isOpen={Boolean(pendingAddonToReview)}
+        addon={pendingAddonToReview}
+        onClose={() => setPendingAddonToReview(null)}
+        onResponded={() => {
+          setPendingAddonToReview(null);
           loadData();
         }}
       />

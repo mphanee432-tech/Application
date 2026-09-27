@@ -16,6 +16,7 @@ import {
   setProfessionalOnlineStatus,
   type Tables,
 } from "@repo/db";
+import { saveProfessionalSettingsAction } from "../actions";
 import {
   ArrowLeft,
   Settings,
@@ -37,6 +38,7 @@ export default function ProfessionalSettingsPage() {
   const supabase = createBrowserSupabaseClient();
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [savingCity, setSavingCity] = useState(false);
   const [savingSkills, setSavingSkills] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -109,56 +111,61 @@ export default function ProfessionalSettingsPage() {
     );
   };
 
-  const handleSaveCity = async () => {
-    if (!user) return;
-    if (!selectedCityId) {
+  const handleSave = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    const selectedCity = selectedCityId;
+    const selectedSkills = selectedSkillIds;
+    console.log("Save button clicked! Payload:", { city_id: selectedCity, services: selectedSkills });
+
+    if (!user) {
+      setFeedback({ type: "error", message: "User session not found. Please log in." });
+      return;
+    }
+    if (!selectedCity) {
       setFeedback({ type: "error", message: "Please select an operating city." });
       return;
     }
 
+    setSaving(true);
     setSavingCity(true);
-    setFeedback(null);
-    try {
-      const res = await updateProfessionalCity(user.id, selectedCityId, supabase);
-      if (!res.success) {
-        setFeedback({ type: "error", message: res.error || "Failed to update operating city." });
-      } else {
-        setFeedback({ type: "success", message: "Operating city updated successfully!" });
-        await loadData();
-      }
-    } catch (err: any) {
-      setFeedback({ type: "error", message: err.message || "Failed to update city." });
-    } finally {
-      setSavingCity(false);
-    }
-  };
-
-  const handleSaveSkills = async () => {
-    if (!user) return;
-    if (selectedSkillIds.length === 0) {
-      setFeedback({ type: "error", message: "Please select at least one offered service skill." });
-      return;
-    }
-
     setSavingSkills(true);
     setFeedback(null);
+
     try {
-      const res = await updateProfessionalSkills(user.id, selectedSkillIds, supabase);
+      const res = await saveProfessionalSettingsAction({
+        professionalId: user.id,
+        city_id: selectedCity,
+        services: selectedSkills,
+      });
+
       if (!res.success) {
-        setFeedback({ type: "error", message: res.error || "Failed to update service skills." });
+        setFeedback({
+          type: "error",
+          message: res.error || "Failed to update professional settings.",
+        });
       } else {
         setFeedback({
           type: "success",
-          message: `Successfully saved ${res.count || selectedSkillIds.length} service specialties!`,
+          message: "Operating city and trade skills saved successfully!",
         });
         await loadData();
+        router.refresh();
       }
     } catch (err: any) {
-      setFeedback({ type: "error", message: err.message || "Failed to update skills." });
+      console.error("Save settings error:", err);
+      setFeedback({
+        type: "error",
+        message: err?.message || "An unexpected error occurred while saving.",
+      });
     } finally {
+      setSaving(false);
+      setSavingCity(false);
       setSavingSkills(false);
     }
   };
+
+  const handleSaveCity = handleSave;
+  const handleSaveSkills = handleSave;
 
   const handleToggleOnlineStatus = async () => {
     if (!user || !proRecord) return;
@@ -217,6 +224,20 @@ export default function ProfessionalSettingsPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-600/20 disabled:opacity-50 transition"
+              title="Save City & Skills"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              <span>Save Settings</span>
+            </button>
             <button
               onClick={handleToggleOnlineStatus}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
@@ -341,19 +362,20 @@ export default function ProfessionalSettingsPage() {
 
             <div className="flex justify-end pt-2">
               <button
-                onClick={handleSaveCity}
-                disabled={savingCity || !selectedCityId || selectedCityId === proRecord?.city_id}
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !selectedCityId}
                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
-                {savingCity ? (
+                {saving ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Saving City...</span>
+                    <span>Saving Settings...</span>
                   </>
                 ) : (
                   <>
                     <Save className="h-4 w-4" />
-                    <span>Update Operating City</span>
+                    <span>Save City & Skills</span>
                   </>
                 )}
               </button>
@@ -422,19 +444,20 @@ export default function ProfessionalSettingsPage() {
               * Changes to your trade skills update the realtime job matching broadcast queue immediately.
             </p>
             <button
-              onClick={handleSaveSkills}
-              disabled={savingSkills || selectedSkillIds.length === 0}
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
-              {savingSkills ? (
+              {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Saving Skills...</span>
+                  <span>Saving Settings...</span>
                 </>
               ) : (
                 <>
                   <Save className="h-4 w-4" />
-                  <span>Save Trade Skills</span>
+                  <span>Save City & Skills</span>
                 </>
               )}
             </button>

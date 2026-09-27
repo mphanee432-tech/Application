@@ -10,6 +10,7 @@ import {
   depositWalletFunds,
   redeemPromoCode,
   fetchUserTransactions,
+  topUpDemoBalance,
   VALID_PROMO_CODES,
   type Tables,
 } from "@repo/db";
@@ -37,6 +38,11 @@ export default function UserWalletPage() {
   const [wallet, setWallet] = useState<Tables<"wallets"> | null>(null);
   const [transactions, setTransactions] = useState<Tables<"transactions">[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Demo Top-Up State
+  const [demoTopUpLoading, setDemoTopUpLoading] = useState(false);
+  const [demoTopUpMsg, setDemoTopUpMsg] = useState<string | null>(null);
 
   // Deposit Form State
   const [depositAmount, setDepositAmount] = useState<string>("50");
@@ -160,6 +166,26 @@ export default function UserWalletPage() {
     }
   };
 
+  const handleInstantDemoTopUp = async () => {
+    try {
+      setDemoTopUpLoading(true);
+      setDemoTopUpMsg(null);
+      setDepositError(null);
+      const res = await topUpDemoBalance(500, supabase);
+      if (res.success && typeof res.newBalance === "number") {
+        setWallet((prev) => (prev ? { ...prev, balance: res.newBalance! } : null));
+        setDemoTopUpMsg("⚡ Added $500.00 Demo Credits to your balance!");
+        if (user) await loadWalletData(user.id);
+      } else {
+        setDepositError(res.error || "Failed to top up demo balance.");
+      }
+    } catch (err: any) {
+      setDepositError(err?.message || "Demo top-up failed.");
+    } finally {
+      setDemoTopUpLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
@@ -204,7 +230,19 @@ export default function UserWalletPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <button
+              onClick={() => {
+                setRefreshing(true);
+                router.refresh();
+                if (user) loadWalletData(user.id).finally(() => setRefreshing(false));
+              }}
+              disabled={refreshing}
+              className="p-1.5 rounded-xl border border-slate-800 bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+              title="Soft Refresh Balance"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-blue-400" : ""}`} />
+            </button>
             <span>{user?.email}</span>
           </div>
         </div>
@@ -215,20 +253,43 @@ export default function UserWalletPage() {
         {/* Wallet Balance Cards */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Total Purchasing Power */}
-          <div className="relative overflow-hidden rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/60 via-slate-900 to-slate-900 p-6 shadow-xl">
-            <div className="flex items-center justify-between text-blue-300">
-              <span className="text-xs font-semibold uppercase tracking-wider">Total Available</span>
-              <Sparkles className="h-5 w-5 text-blue-400" />
+          <div className="relative overflow-hidden rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/60 via-slate-900 to-slate-900 p-6 shadow-xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-blue-300">
+                <span className="text-xs font-semibold uppercase tracking-wider">Total Available</span>
+                <Sparkles className="h-5 w-5 text-blue-400" />
+              </div>
+              <div className="mt-4 flex items-baseline gap-2">
+                <span className="text-4xl font-extrabold text-white">
+                  ${totalPurchasingPower.toFixed(2)}
+                </span>
+                <span className="text-xs font-bold text-blue-400">{wallet?.currency || "USD"}</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Auto-applied at checkout: cash balance + promotional credits.
+              </p>
             </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-4xl font-extrabold text-white">
-                ${totalPurchasingPower.toFixed(2)}
-              </span>
-              <span className="text-xs font-bold text-blue-400">{wallet?.currency || "USD"}</span>
+
+            <div className="mt-4 pt-3 border-t border-blue-900/50">
+              <button
+                type="button"
+                onClick={handleInstantDemoTopUp}
+                disabled={demoTopUpLoading}
+                className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition"
+              >
+                {demoTopUpLoading ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <PlusCircle className="h-3.5 w-3.5" />
+                )}
+                <span>⚡ Top-Up Demo Balance (+$500.00)</span>
+              </button>
+              {demoTopUpMsg && (
+                <p className="mt-2 text-[11px] font-semibold text-emerald-400 text-center">
+                  {demoTopUpMsg}
+                </p>
+              )}
             </div>
-            <p className="mt-2 text-xs text-slate-400">
-              Auto-applied at checkout: cash balance + promotional credits.
-            </p>
           </div>
 
           {/* Cash Balance */}
