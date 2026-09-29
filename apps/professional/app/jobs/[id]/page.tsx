@@ -42,7 +42,7 @@ export default function ProfessionalJobDrillDownPage() {
   const router = useRouter();
   const jobId = params?.id as string;
 
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("professional"));
   const [user, setUser] = useState<any>(null);
   const [job, setJob] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -319,7 +319,7 @@ export default function ProfessionalJobDrillDownPage() {
               <div className="text-right">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Payout</span>
                 <span className="text-lg font-black text-emerald-400">
-                  ${Number(job.price || 0).toFixed(2)}
+                  ₹{Number(job.price || 0).toFixed(2)}
                 </span>
               </div>
             </div>

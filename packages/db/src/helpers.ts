@@ -142,11 +142,14 @@ export async function fetchCurrentProfessional(
 export async function createBooking(
   booking: {
     serviceType: string;
+    cityId?: string;
+    serviceId?: string;
     lat?: number;
     lng?: number;
     address?: string;
     price?: number;
     notes?: string;
+    scheduledDate?: string;
   },
   customClient?: TypedSupabaseClient
 ): Promise<Tables<"bookings">> {
@@ -157,12 +160,15 @@ export async function createBooking(
   const insertPayload: TablesInsert<"bookings"> = {
     customer_id: user.id,
     service_type: booking.serviceType,
+    city_id: booking.cityId || null,
+    service_id: booking.serviceId || null,
     status: "pending",
     lat: booking.lat ?? 37.7749,
     lng: booking.lng ?? -122.4194,
     address: booking.address ?? "Customer Location Pin",
     price: booking.price ?? 75.0,
     notes: booking.notes ?? null,
+    scheduled_date: booking.scheduledDate || null,
   };
 
   const { data, error } = await client
@@ -195,10 +201,16 @@ export async function fetchCustomerBookings(
 /**
  * Core Bookings - Professional Operations
  */
+export interface FetchAvailableJobsResult {
+  success: boolean;
+  data: any[];
+  error?: string;
+}
+
 export async function fetchAvailableJobs(
   professionalId?: string,
   customClient?: TypedSupabaseClient
-): Promise<any[]> {
+): Promise<FetchAvailableJobsResult> {
   try {
     const client = (customClient ?? createBrowserSupabaseClient()) as any;
     let proId = professionalId;
@@ -207,7 +219,7 @@ export async function fetchAvailableJobs(
       if (user) proId = user.id;
     }
 
-    if (!proId) return [];
+    if (!proId) return { success: true, data: [] };
 
     // 1. Fetch professional's profile to verify is_online and kyc_status
     const { data: pro, error: proError } = await client
@@ -216,15 +228,23 @@ export async function fetchAvailableJobs(
       .eq("id", proId)
       .maybeSingle();
 
-    if (proError || !pro) {
+    if (proError) {
       console.error("fetchAvailableJobs pro query error:", proError);
-      return [];
+      return {
+        success: false,
+        data: [],
+        error: proError.message || "Failed to load professional record.",
+      };
+    }
+
+    if (!pro) {
+      return { success: true, data: [] };
     }
 
     // STRICT CHECK: ONLY return data if requesting professional is is_online = true AND kyc_status = 'approved' (or status = 'approved')
     const isApproved = pro.kyc_status === "approved" || pro.status === "approved";
     if (pro.is_online !== true || !isApproved || !pro.city_id) {
-      return [];
+      return { success: true, data: [] };
     }
 
     // 2. Get professional's active skills (service_ids)
@@ -235,11 +255,15 @@ export async function fetchAvailableJobs(
 
     if (skillsError) {
       console.error("fetchAvailableJobs skills query error:", skillsError);
-      return [];
+      return {
+        success: false,
+        data: [],
+        error: skillsError.message || "Failed to load professional skills.",
+      };
     }
 
     const serviceIds = (skills || []).map((s: any) => s.service_id).filter(Boolean);
-    if (serviceIds.length === 0) return [];
+    if (serviceIds.length === 0) return { success: true, data: [] };
 
     // 3. Strictly filter jobs where status = 'pending', city_id matches pro's city_id, and service_id in pro's skills
     const { data, error } = await client
@@ -252,12 +276,23 @@ export async function fetchAvailableJobs(
 
     if (error) {
       console.error("fetchAvailableJobs query error:", error);
-      return [];
+      return {
+        success: false,
+        data: [],
+        error: error.message || "Failed to load available broadcast jobs.",
+      };
     }
-    return data || [];
-  } catch (err) {
+    return {
+      success: true,
+      data: data || [],
+    };
+  } catch (err: any) {
     console.error("fetchAvailableJobs unexpected exception:", err);
-    return [];
+    return {
+      success: false,
+      data: [],
+      error: err?.message || "An unexpected error occurred while loading available jobs.",
+    };
   }
 }
 
@@ -678,7 +713,7 @@ export async function finalizeJobWithProof(
 
   if (error) throw error;
 
-  // Process Automated Financial Split (85% pro, 15% platform commission)
+  // Process Automated Financial Split (80% pro net earnings, 20% platform commission)
   try {
     if (data?.professional_id) {
       // 1. Fetch approved add-ons
@@ -692,7 +727,53 @@ export async function finalizeJobWithProof(
       const totalAmount = Number(data.price || 0) + addonsTotal;
 
       if (totalAmount > 0) {
-        const platformFee = Math.round(totalAmount * 0.15 * 100) / 100;
+        // Reconcile customer wallet deduction if needed
+        if (data.customer_id) {
+          try {
+            const { data: custTx } = await client
+              .from("transactions")
+              .select("amount")
+              .eq("booking_id", bookingId)
+              .eq("user_id", data.customer_id)
+              .eq("type", "booking_payment");
+
+            const alreadyCharged = (custTx || []).reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+            const remainingToDeduct = Math.max(0, Math.round((totalAmount - alreadyCharged) * 100) / 100);
+
+            if (remainingToDeduct > 0) {
+              const custWallet = await fetchUserWallet(data.customer_id, client);
+              const newCustBalance = Number(custWallet.balance) - remainingToDeduct;
+
+              await client
+                .from("wallets")
+                .update({
+                  balance: newCustBalance,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", custWallet.id);
+
+              await client.from("transactions").insert({
+                wallet_id: custWallet.id,
+                user_id: data.customer_id,
+                booking_id: bookingId,
+                type: "booking_payment",
+                amount: remainingToDeduct,
+                status: "completed",
+                description: `Payment for ${data.services?.name || "Service"} (Order #${bookingId.slice(0, 8)})${addonsTotal > 0 ? " incl. approved add-ons" : ""}`,
+                metadata: {
+                  gross_amount: totalAmount,
+                  already_charged: alreadyCharged,
+                  deducted: remainingToDeduct,
+                  addons_total: addonsTotal,
+                },
+              });
+            }
+          } catch (custErr) {
+            console.warn("Customer wallet deduction warning in finalizeJobWithProof:", custErr);
+          }
+        }
+
+        const platformFee = Math.round(totalAmount * 0.20 * 100) / 100;
         const netEarnings = Math.round((totalAmount - platformFee) * 100) / 100;
 
         // Fetch pro wallet
@@ -716,7 +797,7 @@ export async function finalizeJobWithProof(
           type: "booking_payment",
           amount: netEarnings,
           status: "completed",
-          description: `Net earnings for ${data.services?.name || "Service"} (Order #${bookingId.slice(0, 8)}) - 85% payout`,
+          description: `Net earnings for ${data.services?.name || "Service"} (Order #${bookingId.slice(0, 8)}) - 80% payout`,
           metadata: {
             total_amount: totalAmount,
             platform_fee: platformFee,
@@ -733,11 +814,11 @@ export async function finalizeJobWithProof(
           type: "platform_fee",
           amount: platformFee,
           status: "completed",
-          description: `Platform Commission (15%) for Order #${bookingId.slice(0, 8)}`,
+          description: `Platform Commission (20%) for Order #${bookingId.slice(0, 8)}`,
           metadata: {
             total_amount: totalAmount,
             platform_fee: platformFee,
-            fee_percentage: 15,
+            fee_percentage: 20,
           },
         });
       }
@@ -748,6 +829,8 @@ export async function finalizeJobWithProof(
 
   return data;
 }
+
+export const completeJob = finalizeJobWithProof;
 
 export async function uploadProofOfWork(
   bookingId: string,
@@ -1540,7 +1623,7 @@ export async function depositWalletFunds(
       type: "deposit",
       amount: amount,
       status: "completed",
-      description: `Added $${amount.toFixed(2)} to in-app wallet`,
+      description: `Added ₹${amount.toFixed(2)} to in-app wallet`,
       metadata: { method: "instant_card_deposit" },
     })
     .select()
@@ -1552,9 +1635,9 @@ export async function depositWalletFunds(
 }
 
 export const VALID_PROMO_CODES: Record<string, { credits: number; description: string }> = {
-  WELCOME25: { credits: 25.00, description: "$25 Welcome Bonus Credits" },
-  HOMESERVE50: { credits: 50.00, description: "$50 Platform Promo Credits" },
-  SAVE10: { credits: 10.00, description: "$10 Community Discount Credits" },
+  WELCOME25: { credits: 25.00, description: "₹25 Welcome Bonus Credits" },
+  HOMESERVE50: { credits: 50.00, description: "₹50 Platform Promo Credits" },
+  SAVE10: { credits: 10.00, description: "₹10 Community Discount Credits" },
 };
 
 export async function redeemPromoCode(
@@ -1862,26 +1945,39 @@ export async function fetchPlatformFinanceLedger(
     }
   }
 
-  // Dynamically include approved add-ons in total GMV and platform commission
+  // Calculate gross booking revenue from completed bookings + approved add-ons
+  const { data: completedBookings } = await client
+    .from("bookings")
+    .select("price")
+    .eq("status", "completed");
+
+  const completedBookingsGross = (completedBookings || []).reduce(
+    (sum: number, b: any) => sum + Number(b.price || 0),
+    0
+  );
+
   const { data: approvedAddons } = await client
     .from("job_addons")
     .select("cost")
     .eq("status", "approved");
 
-  if (approvedAddons && approvedAddons.length > 0) {
-    const addonsTotal = approvedAddons.reduce(
-      (acc: number, a: any) => acc + Number(a.cost || 0),
-      0
-    );
-    totalVolume += addonsTotal;
-    platformCommissions += addonsTotal * 0.2; // 20% platform commission
-  }
+  const addonsTotal = (approvedAddons || []).reduce(
+    (acc: number, a: any) => acc + Number(a.cost || 0),
+    0
+  );
+
+  const totalGrossBookingVolume = completedBookingsGross + addonsTotal;
+  const calculatedGross = totalGrossBookingVolume > 0 ? totalGrossBookingVolume : totalVolume;
+  const calculatedCommission =
+    platformCommissions > 0
+      ? platformCommissions
+      : Math.round(calculatedGross * 0.20 * 100) / 100;
 
   return {
     transactions: data || [],
     metrics: {
-      totalVolume,
-      platformCommissions,
+      totalVolume: calculatedGross,
+      platformCommissions: calculatedCommission,
       pendingPayouts,
       completedPayouts,
     },
@@ -2679,6 +2775,31 @@ export async function updateBookingAddonStatus(
   }
 }
 
+export async function deleteJobAddon(
+  addonId: string,
+  customClient?: TypedSupabaseClient
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const { data, error } = await client
+      .from("job_addons")
+      .delete()
+      .eq("id", addonId)
+      .eq("status", "pending")
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to delete add-on." };
+  }
+}
+
+export const deleteBookingAddon = deleteJobAddon;
+
 export async function fetchBookingTotalWithAddons(
   bookingId: string,
   customClient?: TypedSupabaseClient
@@ -2924,7 +3045,7 @@ export async function topUpDemoBalance(
       type: "deposit",
       amount: amount,
       status: "completed",
-      description: `Demo Balance Top-Up (+$${amount.toFixed(2)})`,
+      description: `Demo Balance Top-Up (+₹${amount.toFixed(2)})`,
       metadata: { method: "demo_top_up", added_at: new Date().toISOString() },
     });
 
@@ -2959,7 +3080,7 @@ export async function processWalletPayment(
     if (currentBalance < price) {
       return {
         success: false,
-        error: `Insufficient wallet balance ($${currentBalance.toFixed(2)}) for order ($${price.toFixed(2)}). Please top up.`,
+        error: `Insufficient wallet balance (₹${currentBalance.toFixed(2)}) for order (₹${price.toFixed(2)}). Please top up.`,
       };
     }
 

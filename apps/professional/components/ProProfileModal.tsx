@@ -30,7 +30,7 @@ export function ProProfileModal({
   onClose,
   onProfileUpdated,
 }: ProProfileModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

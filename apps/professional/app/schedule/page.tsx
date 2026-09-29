@@ -28,7 +28,7 @@ export default function SchedulePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
 
   useEffect(() => {
     async function loadData() {

@@ -40,17 +40,47 @@ export function NotificationBell() {
               table: "notifications",
               filter: `user_id=eq.${user.id}`,
             },
-            async () => {
+            async (payload: any) => {
               if (!isMounted) return;
+              if (payload.eventType === "INSERT") {
+                setUnreadCount((c) => c + 1);
+              }
               const refreshed = await fetchUserNotifications(supabase);
               if (refreshed.success && refreshed.data && isMounted) {
                 const unread = refreshed.data.filter((n: any) => !n.is_read).length;
                 setUnreadCount(unread);
               }
             }
-          );
-
-        channel.subscribe();
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "chat_messages",
+            },
+            (payload: any) => {
+              if (!isMounted) return;
+              if (payload.new && payload.new.sender_id !== user.id) {
+                setUnreadCount((c) => c + 1);
+              }
+            }
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "ticket_replies",
+            },
+            (payload: any) => {
+              if (!isMounted) return;
+              if (payload.new && payload.new.sender_id !== user.id) {
+                setUnreadCount((c) => c + 1);
+              }
+            }
+          )
+          .subscribe();
       } catch (err) {
         console.error("Pro NotificationBell init error:", err);
       }
@@ -83,3 +113,4 @@ export function NotificationBell() {
 }
 
 export default NotificationBell;
+

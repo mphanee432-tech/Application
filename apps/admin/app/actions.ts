@@ -146,3 +146,64 @@ export async function approvePayoutAdminAction(transactionId: string) {
   }
 }
 
+/**
+ * Server Action: Mark support ticket replies as read for admin
+ */
+export async function markSupportTicketReadAction(ticketId: string) {
+  try {
+    const adminClient = getAdminClient();
+    const { error } = await adminClient
+      .from("ticket_replies")
+      .update({ is_read: true })
+      .eq("ticket_id", ticketId)
+      .neq("sender_role", "admin");
+
+    if (error) {
+      console.error("markSupportTicketReadAction error:", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to mark support ticket as read.",
+    };
+  }
+}
+
+/**
+ * Server Action: Acknowledge or resolve an emergency SOS alert
+ */
+export async function acknowledgeSosAlertAction(alertId: string, resolvedBy?: string) {
+  try {
+    const adminClient = getAdminClient();
+    const { data, error } = await adminClient
+      .from("sos_alerts")
+      .update({
+        status: "resolved",
+        resolved_at: new Date().toISOString(),
+        ...(resolvedBy ? { resolved_by: resolvedBy } : {}),
+      })
+      .eq("id", alertId)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("acknowledgeSosAlertAction error:", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/");
+    revalidatePath("/sos");
+    return { success: true, data };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to acknowledge SOS alert.",
+    };
+  }
+}
+
+

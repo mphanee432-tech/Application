@@ -23,7 +23,7 @@ export async function saveProfessionalSettingsAction(params: {
 
   try {
     const cookieStore = await cookies();
-    const supabase = createNextServerClient(cookieStore);
+    const supabase: any = createNextServerClient(cookieStore, "professional");
 
     // Verify session
     const {
@@ -142,3 +142,49 @@ export async function saveProfessionalSettingsAction(params: {
 }
 
 export const saveProfessionalProfile = saveProfessionalSettingsAction;
+
+/**
+ * Server Action: Delete a pending mid-job add-on
+ */
+export async function deleteJobAddonAction(
+  addonId: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    if (!addonId) {
+      return { success: false, error: "Add-on ID is required." };
+    }
+
+    const cookieStore = await cookies();
+    const supabase: any = createNextServerClient(cookieStore, "professional");
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: false, error: "Authentication required." };
+    }
+
+    const { data, error } = await supabase
+      .from("job_addons")
+      .delete()
+      .eq("id", addonId)
+      .eq("status", "pending")
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/");
+    revalidatePath("/chat");
+    return { success: true, data };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error?.message || "Failed to delete add-on.",
+    };
+  }
+}

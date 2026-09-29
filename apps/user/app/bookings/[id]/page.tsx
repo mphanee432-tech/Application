@@ -44,7 +44,7 @@ export default function CustomerBookingDrillDownPage() {
   const router = useRouter();
   const bookingId = params?.id as string;
 
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
   const [user, setUser] = useState<any>(null);
   const [booking, setBooking] = useState<any | null>(null);
   const [review, setReview] = useState<Tables<"reviews"> | null>(null);
@@ -145,8 +145,19 @@ export default function CustomerBookingDrillDownPage() {
             },
             (payload: any) => {
               if (!isMounted) return;
-              if (payload.new && payload.new.status === "pending") {
-                setPendingAddonToReview(payload.new);
+              if (payload.eventType === "INSERT" && payload.new) {
+                setAddons((prev) => [payload.new, ...prev.filter((a) => a.id !== payload.new.id)]);
+                if (payload.new.status === "pending") {
+                  setPendingAddonToReview(payload.new);
+                }
+              } else if (payload.eventType === "UPDATE" && payload.new) {
+                setAddons((prev) => prev.map((a) => (a.id === payload.new.id ? { ...a, ...payload.new } : a)));
+                if (payload.new.status !== "pending") {
+                  setPendingAddonToReview((curr: any) => (curr?.id === payload.new.id ? null : curr));
+                }
+              } else if (payload.eventType === "DELETE" && payload.old) {
+                setAddons((prev) => prev.filter((a) => a.id !== payload.old.id));
+                setPendingAddonToReview((curr: any) => (curr?.id === payload.old.id ? null : curr));
               }
               loadData();
             }

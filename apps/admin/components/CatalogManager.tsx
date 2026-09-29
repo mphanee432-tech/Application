@@ -31,7 +31,7 @@ import {
 } from "@repo/db";
 
 export function CatalogManager() {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("admin");
 
   const [catalogTab, setCatalogTab] = useState<"cities" | "services" | "pricing">("pricing");
   const [cities, setCities] = useState<Tables<"cities">[]>([]);
@@ -337,7 +337,7 @@ export function CatalogManager() {
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th className="pb-3 font-semibold">Service Name</th>
                     <th className="pb-3 font-semibold">Base Price</th>
-                    <th className="pb-3 font-semibold">City Custom Price ($)</th>
+                    <th className="pb-3 font-semibold">City Custom Price (₹)</th>
                     <th className="pb-3 font-semibold">City Availability</th>
                     <th className="pb-3 text-right font-semibold">Action</th>
                   </tr>
@@ -353,10 +353,10 @@ export function CatalogManager() {
                     return (
                       <tr key={service.id} className="hover:bg-slate-800/30">
                         <td className="py-4 font-bold text-white">{service.name}</td>
-                        <td className="py-4 text-slate-400">${Number(service.base_price).toFixed(2)}</td>
+                        <td className="py-4 text-slate-400">₹{Number(service.base_price).toFixed(2)}</td>
                         <td className="py-4">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-slate-500">$</span>
+                            <span className="text-slate-500">₹</span>
                             <input
                               type="number"
                               step="0.01"
@@ -576,7 +576,7 @@ export function CatalogManager() {
                 <input
                   type="number"
                   step="0.01"
-                  placeholder="Base Price ($)"
+                  placeholder="Base Price (₹)"
                   value={newServicePrice}
                   onChange={(e) => setNewServicePrice(e.target.value)}
                   className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
@@ -637,7 +637,7 @@ export function CatalogManager() {
                           className="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white"
                         />
                       ) : (
-                        `$${Number(service.base_price).toFixed(2)}`
+                        `₹${Number(service.base_price).toFixed(2)}`
                       )}
                     </td>
                     <td className="py-4">

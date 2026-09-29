@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 
 export default function CustomerChatPage() {
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
   const [userId, setUserId] = useState<string | null>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
@@ -275,7 +275,7 @@ export default function CustomerChatPage() {
                           {b.service_type || b.service?.name || "Service Request"}
                         </span>
                         <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
-                          ${Number(b.price).toFixed(2)}
+                          ₹{Number(b.price).toFixed(2)}
                         </span>
                       </div>
 
@@ -423,6 +423,9 @@ export default function CustomerChatPage() {
                                 <span className="text-[8px] uppercase tracking-wider font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1 rounded">
                                   Pro
                                 </span>
+                              )}
+                              {!isMe && msg.is_read === false && (
+                                <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" title="Unread" />
                               )}
                               <span className="text-[9px] text-slate-500">
                                 {new Date(msg.created_at).toLocaleTimeString([], {

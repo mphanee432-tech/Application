@@ -10,7 +10,7 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
-  DollarSign,
+  Trash2,
   Wrench,
   Sparkles,
   ExternalLink,
@@ -21,6 +21,7 @@ import {
   fetchBookingAddons,
   type Tables,
 } from "@repo/db";
+import { deleteJobAddonAction } from "../app/actions";
 
 interface AddServicePartDrawerProps {
   isOpen: boolean;
@@ -35,7 +36,7 @@ export function AddServicePartDrawer({
   onClose,
   onAddonCreated,
 }: AddServicePartDrawerProps) {
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("professional"));
   const [mode, setMode] = useState<"catalog" | "custom">("custom");
   const [catalogServices, setCatalogServices] = useState<any[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
@@ -47,6 +48,7 @@ export function AddServicePartDrawer({
   const [addons, setAddons] = useState<any[]>([]);
   const [loadingAddons, setLoadingAddons] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingAddonId, setDeletingAddonId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -89,16 +91,24 @@ export function AddServicePartDrawer({
           table: "job_addons",
           filter: `booking_id=eq.${booking.id}`,
         },
-        async () => {
+        async (payload: any) => {
           if (!isMounted) return;
+          if (payload.eventType === "INSERT" && payload.new) {
+            setAddons((prev) => [payload.new, ...prev.filter((a) => a.id !== payload.new.id)]);
+          } else if (payload.eventType === "UPDATE" && payload.new) {
+            setAddons((prev) => prev.map((a) => (a.id === payload.new.id ? { ...a, ...payload.new } : a)));
+          } else if (payload.eventType === "DELETE" && payload.old) {
+            setAddons((prev) => prev.filter((a) => a.id !== payload.old.id));
+          }
+          onAddonCreated?.();
+
+          // Sync full join records asynchronously in background
           const res = await fetchBookingAddons(booking.id, supabase);
-          if (isMounted) {
-            setAddons(res.success ? (res.data || []) : []);
-            onAddonCreated?.();
+          if (isMounted && res.success && Array.isArray(res.data)) {
+            setAddons(res.data);
           }
         }
       );
-
     channel.subscribe();
 
     return () => {
@@ -136,7 +146,7 @@ export function AddServicePartDrawer({
 
     const numericCost = parseFloat(cost);
     if (isNaN(numericCost) || numericCost <= 0) {
-      setError("Please specify a valid add-on price greater than $0.");
+      setError("Please specify a valid add-on price greater than ₹0.");
       return;
     }
 
@@ -183,6 +193,26 @@ export function AddServicePartDrawer({
       setError(err.message || "Failed to submit add-on.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteAddon = async (addonId: string) => {
+    try {
+      setDeletingAddonId(addonId);
+      setError(null);
+      const res = await deleteJobAddonAction(addonId);
+      if (!res.success) {
+        throw new Error(res.error || "Failed to delete add-on.");
+      }
+      setSuccessMsg("Pending add-on deleted successfully.");
+      const refreshed = await fetchBookingAddons(booking.id, supabase);
+      setAddons(refreshed.success ? (refreshed.data || []) : []);
+      onAddonCreated?.();
+    } catch (err: any) {
+      console.error("Delete addon error:", err);
+      setError(err?.message || "Failed to delete add-on.");
+    } finally {
+      setDeletingAddonId(null);
     }
   };
 
@@ -271,12 +301,12 @@ export function AddServicePartDrawer({
                         {a.custom_description || a.service?.name || "Additional Service"}
                       </p>
                       <p className="text-[11px] text-slate-400 font-mono">
-                        ${Number(a.cost || 0).toFixed(2)}
+                        ₹{Number(a.cost || 0).toFixed(2)}
                       </p>
                     </div>
                   </div>
 
-                  <div>
+                  <div className="flex items-center gap-2">
                     {a.status === "approved" ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                         <CheckCircle2 className="h-3 w-3" />
@@ -288,10 +318,25 @@ export function AddServicePartDrawer({
                         Declined
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
-                        <Clock className="h-3 w-3" />
-                        Pending Approval
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                          <Clock className="h-3 w-3" />
+                          Pending Approval
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAddon(a.id)}
+                          disabled={deletingAddonId === a.id}
+                          className="p-1.5 rounded-lg bg-red-950/60 hover:bg-red-900 border border-red-800/80 text-red-300 hover:text-white transition disabled:opacity-50"
+                          title="Delete pending add-on"
+                        >
+                          {deletingAddonId === a.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-red-400" />
+                          ) : (
+                            <Trash2 className="h-3 w-3 text-red-400" />
+                          )}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -344,7 +389,7 @@ export function AddServicePartDrawer({
                 <option value="">-- Choose catalog service --</option>
                 {catalogServices.map((svc) => (
                   <option key={svc.id} value={svc.id}>
-                    {svc.name} (${Number(svc.base_price || 0).toFixed(2)})
+                    {svc.name} (₹{Number(svc.base_price || 0).toFixed(2)})
                   </option>
                 ))}
               </select>
@@ -367,10 +412,10 @@ export function AddServicePartDrawer({
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Add-on Cost ($ USD)
+              Add-on Cost (₹ INR)
             </label>
             <div className="relative">
-              <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+              <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-500">₹</span>
               <input
                 type="number"
                 step="0.01"

@@ -16,7 +16,7 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("admin");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

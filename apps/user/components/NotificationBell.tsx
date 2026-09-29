@@ -10,7 +10,7 @@ import {
 } from "@repo/db";
 
 export function NotificationBell() {
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [userId, setUserId] = useState<string | null>(null);
 

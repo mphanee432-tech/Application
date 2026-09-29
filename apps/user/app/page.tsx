@@ -62,7 +62,7 @@ const DraggableAddressMap = dynamic(
 
 export default function UserPortal() {
   const router = useRouter();
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
 
   // Dynamic catalog state
   const [cities, setCities] = useState<Tables<"cities">[]>([]);
@@ -263,25 +263,64 @@ export default function UserPortal() {
         (payload: any) => {
           if (!isMounted) return;
           if (payload.new && payload.new.status === "pending") {
-            setPendingAddonToReview(payload.new);
+            const bookingId = payload.new?.booking_id || payload.old?.booking_id;
+            if (bookingId) {
+              setBookingAddonsMap((prev) => {
+                const currentList = prev[bookingId] || [];
+                if (payload.eventType === "INSERT" && payload.new) {
+                  return {
+                    ...prev,
+                    [bookingId]: [payload.new, ...currentList.filter((a) => a.id !== payload.new.id)],
+                  };
+                } else if (payload.eventType === "UPDATE" && payload.new) {
+                  return {
+                    ...prev,
+                    [bookingId]: currentList.map((a) => (a.id === payload.new.id ? { ...a, ...payload.new } : a)),
+                  };
+                } else if (payload.eventType === "DELETE" && payload.old) {
+                  return {
+                    ...prev,
+                    [bookingId]: currentList.filter((a) => a.id !== payload.old.id),
+                  };
+                }
+                return prev;
+              });
+            }
+            if (payload.eventType === "INSERT" && payload.new?.status === "pending") {
+              setPendingAddonToReview(payload.new);
+            } else if (payload.eventType === "UPDATE" && payload.new?.status !== "pending") {
+              setPendingAddonToReview((curr: any) => (curr?.id === payload.new?.id ? null : curr));
+            } else if (payload.eventType === "DELETE") {
+              setPendingAddonToReview((curr: any) => (curr?.id === payload.old?.id ? null : curr));
+            }
+            loadInitialData();
           }
-          loadInitialData();
         }
-      )
-      .on(
+      ).on(
         "postgres_changes",
         { event: "*", schema: "public", table: "chat_messages" },
-        () => {
+        (payload: any) => {
           if (!isMounted) return;
           getUnreadChatCount(undefined, supabase).then(setUnreadChatCount);
+          if (payload.eventType === "INSERT" && payload.new && payload.new.sender_id !== user?.id) {
+            setUnreadChatCount((c) => c + 1);
+          }
+          getUnreadChatCount(undefined, supabase).then((cnt) => {
+            if (isMounted) setUnreadChatCount(cnt);
+          });
         }
-      )
-      .on(
+      ).on(
         "postgres_changes",
         { event: "*", schema: "public", table: "ticket_replies" },
-        () => {
+        (payload: any) => {
           if (!isMounted) return;
           getUnreadSupportCount(undefined, "customer", supabase).then(setUnreadSupportCount);
+          if (payload.eventType === "INSERT" && payload.new && payload.new.sender_id !== user?.id) {
+            setUnreadSupportCount((c) => c + 1);
+          }
+          getUnreadSupportCount(undefined, "customer", supabase).then((cnt) => {
+            if (isMounted) setUnreadSupportCount(cnt);
+          });
         }
       );
     channel.subscribe();
@@ -604,7 +643,7 @@ export default function UserPortal() {
                       <div className="flex justify-between items-start mb-1.5">
                         <span className="font-semibold text-sm text-slate-100">{svc.name}</span>
                         <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/50">
-                          ${Number(svc.base_price).toFixed(2)}
+                          ₹{Number(svc.base_price).toFixed(2)}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400">
@@ -723,7 +762,7 @@ export default function UserPortal() {
                 <div>
                   <span className="text-[11px] text-slate-400 block">Total Estimated Price</span>
                   <span className="text-base font-bold text-white">
-                    ${selectedService ? Number(selectedService.base_price).toFixed(2) : "0.00"}
+                    ₹{selectedService ? Number(selectedService.base_price).toFixed(2) : "0.00"}
                   </span>
                 </div>
 
@@ -779,7 +818,7 @@ export default function UserPortal() {
                           </div>
                           <div className="text-right">
                             <span className="text-xs font-bold text-emerald-400 block">
-                              ${Number(b.price).toFixed(2)}
+                              ₹{Number(b.price).toFixed(2)}
                             </span>
                             <span className="text-[9px] font-mono text-slate-500">
                               #{b.id.slice(0, 8)}
@@ -910,7 +949,7 @@ export default function UserPortal() {
                                   <div className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-amber-400 animate-pulse shrink-0" />
                                     <span>
-                                      <strong>Add-on Suggested (+${Number(pending[0].cost).toFixed(2)}):</strong>{" "}
+                                      <strong>Add-on Suggested (+₹{Number(pending[0].cost).toFixed(2)}):</strong>{" "}
                                       {pending[0].custom_description ||
                                         pending[0].service?.name ||
                                         "Additional labor/part"}
@@ -928,7 +967,7 @@ export default function UserPortal() {
                               {approved.length > 0 && (
                                 <div className="flex items-center justify-between text-xs text-emerald-400 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-900/50">
                                   <span>Approved Mid-Job Add-ons ({approved.length})</span>
-                                  <span className="font-bold">+${approvedTotal.toFixed(2)}</span>
+                                  <span className="font-bold">+₹{approvedTotal.toFixed(2)}</span>
                                 </div>
                               )}
                             </div>
@@ -996,7 +1035,7 @@ export default function UserPortal() {
                         )}
                       </div>
                       <div className="text-right">
-                        <span className="font-bold text-emerald-400 text-xs">${Number(b.price).toFixed(2)}</span>
+                        <span className="font-bold text-emerald-400 text-xs">₹{Number(b.price).toFixed(2)}</span>
                         <div className="text-[10px] font-mono text-slate-400 uppercase">{b.status}</div>
                         <Link
                           href={`/bookings/${b.id}`}

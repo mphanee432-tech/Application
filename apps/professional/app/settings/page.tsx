@@ -35,7 +35,7 @@ import {
 
 export default function ProfessionalSettingsPage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

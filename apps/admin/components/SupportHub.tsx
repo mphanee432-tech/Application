@@ -28,7 +28,7 @@ import {
 } from "@repo/db";
 
 export function SupportHub() {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("admin");
 
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

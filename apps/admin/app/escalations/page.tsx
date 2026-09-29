@@ -30,7 +30,7 @@ import {
 
 export default function SlaEscalationDashboard() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("admin");
 
   const [loading, setLoading] = useState(true);
   const [escalatedBookings, setEscalatedBookings] = useState<any[]>([]);
@@ -296,7 +296,7 @@ export default function SlaEscalationDashboard() {
 
                         {/* Price */}
                         <td className="py-4 font-bold text-slate-200 font-mono">
-                          ${Number(booking.price).toFixed(2)}
+                          ₹{Number(booking.price).toFixed(2)}
                         </td>
 
                         {/* Wait Time & SLA Badge */}

@@ -161,7 +161,7 @@ export function BookingDetailModal({
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
               <span className="text-slate-400 block mb-1">Order Amount</span>
               <span className="font-bold text-emerald-400 text-sm block">
-                ${Number(booking.price || 0).toFixed(2)}
+                ₹{Number(booking.price || 0).toFixed(2)}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -327,7 +327,7 @@ export function BookingDetailModal({
                 </p>
                 {booking.cancellation_fee > 0 && (
                   <p>
-                    <strong className="text-slate-400">Cancellation Fee:</strong> $
+                    <strong className="text-slate-400">Cancellation Fee:</strong> ₹
                     {Number(booking.cancellation_fee).toFixed(2)}
                   </p>
                 )}

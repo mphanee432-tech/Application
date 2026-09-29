@@ -60,7 +60,7 @@ import {
 
 export default function ProfessionalPortal() {
   const router = useRouter();
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("professional"));
 
   const [user, setUser] = useState<any>(null);
   const [proRecord, setProRecord] = useState<any>(null);
@@ -115,11 +115,17 @@ export default function ProfessionalPortal() {
           setIsOnline(proData.is_online !== false);
         }
 
-        const [jobs, activeList] = await Promise.all([
+        const [jobsRes, activeList] = await Promise.all([
           fetchAvailableJobs(proData?.id),
           fetchActiveJobsForPro(),
         ]);
-        setAvailableJobs(jobs);
+        if (jobsRes.success) {
+          setAvailableJobs(jobsRes.data || []);
+        } else {
+          console.error("fetchAvailableJobs error:", jobsRes.error);
+          setFeedbackMessage(jobsRes.error || "Failed to load broadcast jobs.");
+          setAvailableJobs([]);
+        }
         setActiveJobs(activeList);
         setActiveJob(activeList[0] || null);
 
@@ -180,24 +186,59 @@ export default function ProfessionalPortal() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "job_addons" },
-        () => {
-          if (isMounted) loadData();
+        (payload: any) => {
+          if (!isMounted) return;
+          const bookingId = payload.new?.booking_id || payload.old?.booking_id;
+          if (bookingId) {
+            setJobAddonsMap((prev) => {
+              const currentList = prev[bookingId] || [];
+              if (payload.eventType === "INSERT" && payload.new) {
+                return {
+                  ...prev,
+                  [bookingId]: [payload.new, ...currentList.filter((a) => a.id !== payload.new.id)],
+                };
+              } else if (payload.eventType === "UPDATE" && payload.new) {
+                return {
+                  ...prev,
+                  [bookingId]: currentList.map((a) => (a.id === payload.new.id ? { ...a, ...payload.new } : a)),
+                };
+              } else if (payload.eventType === "DELETE" && payload.old) {
+                return {
+                  ...prev,
+                  [bookingId]: currentList.filter((a) => a.id !== payload.old.id),
+                };
+              }
+              return prev;
+            });
+          }
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "chat_messages" },
-        () => {
+        (payload: any) => {
           if (!isMounted) return;
           getUnreadChatCount(undefined, supabase).then(setUnreadChatCount);
+          if (payload.eventType === "INSERT" && payload.new && payload.new.sender_id !== user?.id) {
+            setUnreadChatCount((c) => c + 1);
+          }
+          getUnreadChatCount(undefined, supabase).then((cnt) => {
+            if (isMounted) setUnreadChatCount(cnt);
+          });
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "ticket_replies" },
-        () => {
+        (payload: any) => {
           if (!isMounted) return;
           getUnreadSupportCount(undefined, "professional", supabase).then(setUnreadSupportCount);
+          if (payload.eventType === "INSERT" && payload.new && payload.new.sender_id !== user?.id) {
+            setUnreadSupportCount((c) => c + 1);
+          }
+          getUnreadSupportCount(undefined, "professional", supabase).then((cnt) => {
+            if (isMounted) setUnreadSupportCount(cnt);
+          });
         }
       );
     channel.subscribe();
@@ -275,8 +316,12 @@ export default function ProfessionalPortal() {
       await setProfessionalOnlineStatus(user.id, nextStatus, supabase);
       setFeedbackMessage(nextStatus ? "You are now ONLINE and ready for jobs." : "You are now OFFLINE.");
       if (proRecord?.id) {
-        const jobs = await fetchAvailableJobs(proRecord.id, supabase);
-        setAvailableJobs(jobs);
+        const jobsRes = await fetchAvailableJobs(proRecord.id, supabase);
+        if (jobsRes.success) {
+          setAvailableJobs(jobsRes.data || []);
+        } else {
+          setFeedbackMessage(jobsRes.error || "Failed to refresh available jobs.");
+        }
       }
     } catch (err: any) {
       console.error("Failed to update online status:", err);
@@ -610,7 +655,7 @@ export default function ProfessionalPortal() {
                       <div className="text-right">
                         <span className="text-xs text-slate-400">Job Payout</span>
                         <p className="text-xl font-black text-emerald-400">
-                          ${Number(job.price).toFixed(2)}
+                          ₹{Number(job.price).toFixed(2)}
                         </p>
                         <Link
                           href={`/jobs/${job.id}`}
@@ -818,7 +863,7 @@ export default function ProfessionalPortal() {
                       <h4 className="text-sm font-bold text-white mt-0.5">{job.service_type}</h4>
                     </div>
                     <span className="text-sm font-black text-emerald-400">
-                      ${Number(job.price).toFixed(2)}
+                      ₹{Number(job.price).toFixed(2)}
                     </span>
                   </div>
 

@@ -11,7 +11,6 @@ import {
 } from "@repo/db";
 import { approvePayoutAdminAction } from "../actions";
 import {
-  DollarSign,
   TrendingUp,
   Clock,
   CheckCircle2,
@@ -30,7 +29,7 @@ import {
 
 export default function AdminFinancePage() {
   const router = useRouter();
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("admin"));
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -174,7 +173,7 @@ export default function AdminFinancePage() {
             <div className="h-4 w-px bg-slate-800" />
             <div className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold text-sm">
-                <DollarSign className="h-4 w-4" />
+                <span>₹</span>
               </div>
               <div>
                 <h1 className="text-sm font-bold text-white flex items-center gap-2">
@@ -231,23 +230,23 @@ export default function AdminFinancePage() {
           {/* Gross Volume */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase">Gross Platform Volume</span>
-              <DollarSign className="h-4 w-4 text-emerald-400" />
+              <span className="text-xs font-semibold uppercase">Total Booking Revenue (Gross)</span>
+              <span className="font-bold text-sm text-emerald-400">₹</span>
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${metrics.totalVolume.toFixed(2)}</p>
-            <p className="mt-1 text-[11px] text-slate-500">Customer payments & deposits</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{metrics.totalVolume.toFixed(2)}</p>
+            <p className="mt-1 text-[11px] text-slate-500">Gross completed bookings + add-ons</p>
           </div>
 
           {/* Platform Revenue Commissions */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase">Platform Commissions</span>
+              <span className="text-xs font-semibold uppercase">Net Platform Revenue</span>
               <Percent className="h-4 w-4 text-indigo-400" />
             </div>
             <p className="mt-2 text-2xl font-black text-indigo-400">
-              ${metrics.platformCommissions.toFixed(2)}
+              ₹{metrics.platformCommissions.toFixed(2)}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500">15% net platform retention</p>
+            <p className="mt-1 text-[11px] text-slate-500">20% net platform commission</p>
           </div>
 
           {/* Pending Payouts */}
@@ -257,7 +256,7 @@ export default function AdminFinancePage() {
               <Clock className="h-4 w-4 text-amber-400" />
             </div>
             <p className="mt-2 text-2xl font-black text-amber-400">
-              ${metrics.pendingPayouts.toFixed(2)}
+              ₹{metrics.pendingPayouts.toFixed(2)}
             </p>
             <p className="mt-1 text-[11px] text-slate-500">{pendingPayoutsList.length} awaiting approval</p>
           </div>
@@ -269,7 +268,7 @@ export default function AdminFinancePage() {
               <Banknote className="h-4 w-4 text-blue-400" />
             </div>
             <p className="mt-2 text-2xl font-black text-white">
-              ${metrics.completedPayouts.toFixed(2)}
+              ₹{metrics.completedPayouts.toFixed(2)}
             </p>
             <p className="mt-1 text-[11px] text-slate-500">Disbursed to service pros</p>
           </div>
@@ -315,7 +314,7 @@ export default function AdminFinancePage() {
 
                     <div className="text-right">
                       <span className="text-2xl font-black text-amber-400">
-                        ${Number(tx.amount).toFixed(2)}
+                        ₹{Number(tx.amount).toFixed(2)}
                       </span>
                       <p className="text-[10px] text-slate-400">Instant ACH / Card</p>
                     </div>
@@ -474,7 +473,7 @@ export default function AdminFinancePage() {
                               isCredit ? "text-emerald-400" : "text-amber-400"
                             }`}
                           >
-                            {isCredit ? "+" : "-"}${Number(tx.amount).toFixed(2)}
+                            {isCredit ? "+" : "-"}₹{Number(tx.amount).toFixed(2)}
                           </td>
                         </tr>
                       );

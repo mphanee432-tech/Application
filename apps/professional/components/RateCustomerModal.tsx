@@ -44,7 +44,7 @@ export function RateCustomerModal({
     try {
       setSubmitting(true);
       setError(null);
-      const supabase = createBrowserSupabaseClient();
+      const supabase = createBrowserSupabaseClient("professional");
 
       const combinedComment = [
         selectedTags.length > 0 ? `Tags: ${selectedTags.join(", ")}` : null,

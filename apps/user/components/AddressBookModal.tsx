@@ -34,7 +34,7 @@ export function AddressBookModal({
   onClose,
   onSelectAddress,
 }: AddressBookModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("user");
   const [addresses, setAddresses] = useState<Tables<"customer_addresses">[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

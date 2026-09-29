@@ -91,7 +91,7 @@ export default function CancellationsDashboard() {
               <span className="text-xs text-slate-400">Average Fee</span>
               <DollarSign className="h-4 w-4 text-emerald-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-emerald-400">${avgFee}</p>
+            <p className="mt-2 text-2xl font-black text-emerald-400">₹{avgFee}</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="flex items-center justify-between">
@@ -151,7 +151,7 @@ export default function CancellationsDashboard() {
                         {booking.cancellation_reason || "None"}
                       </td>
                       <td className="py-4 font-mono text-emerald-400">
-                        ${Number(booking.cancellation_fee || 0).toFixed(2)}
+                        ₹{Number(booking.cancellation_fee || 0).toFixed(2)}
                       </td>
                       <td className="py-4 text-slate-400 text-[11px]">
                         {new Date(booking.created_at).toLocaleDateString()}

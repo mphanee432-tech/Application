@@ -22,7 +22,7 @@ export default function ChatPage() {
   const [user, setUser] = useState<any>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
 
   useEffect(() => {
     async function loadInitialData() {

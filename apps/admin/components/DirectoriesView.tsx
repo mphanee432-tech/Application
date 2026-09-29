@@ -15,11 +15,13 @@ import {
   Star,
   Power,
   ShieldCheck,
+  History,
 } from "lucide-react";
 import {
   fetchAllCustomersAdmin,
   fetchAllProfessionalsAdmin,
 } from "../app/actions";
+import { UserBookingHistoryModal } from "./UserBookingHistoryModal";
 
 export function DirectoriesView() {
   const [dirTab, setDirTab] = useState<"customers" | "professionals">("customers");
@@ -29,6 +31,12 @@ export function DirectoriesView() {
   const [search, setSearch] = useState("");
   const [kycFilter, setKycFilter] = useState<string>("all");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<{
+    id: string;
+    name: string;
+    email?: string;
+    role: "customer" | "professional";
+  } | null>(null);
 
   const loadDirectories = async () => {
     try {
@@ -201,17 +209,24 @@ export function DirectoriesView() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
+                    <th className="pb-3 font-semibold">User ID</th>
                     <th className="pb-3 font-semibold">User</th>
                     <th className="pb-3 font-semibold">Email</th>
                     <th className="pb-3 font-semibold">Mobile / Phone</th>
                     <th className="pb-3 font-semibold">Total Orders</th>
                     <th className="pb-3 font-semibold">Total Spend</th>
-                    <th className="pb-3 text-right font-semibold">Registered</th>
+                    <th className="pb-3 font-semibold">Registered</th>
+                    <th className="pb-3 text-right font-semibold">History</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {filteredCustomers.map((cust) => (
-                    <tr key={cust.id} className="hover:bg-slate-800/30">
+                    <tr key={cust.id} className="hover:bg-slate-800/30 transition">
+                      <td className="py-4">
+                        <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
+                          #{cust.id.slice(0, 8)}
+                        </span>
+                      </td>
                       <td className="py-4 font-bold text-white">
                         <div className="flex items-center gap-2">
                           <div className="h-7 w-7 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-xs uppercase">
@@ -236,10 +251,27 @@ export function DirectoriesView() {
                         </span>
                       </td>
                       <td className="py-4 font-bold text-emerald-400 font-mono">
-                        ${Number(cust.total_spent || 0).toFixed(2)}
+                        ₹{Number(cust.total_spent || 0).toFixed(2)}
                       </td>
-                      <td className="py-4 text-right text-slate-400 text-[11px]">
+                      <td className="py-4 text-slate-400 text-[11px]">
                         {new Date(cust.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="py-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setHistoryTarget({
+                              id: cust.id,
+                              name: cust.full_name || "Resident Client",
+                              email: cust.email,
+                              role: "customer",
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition text-[11px] font-semibold inline-flex items-center gap-1"
+                        >
+                          <History className="h-3 w-3" />
+                          <span>View History</span>
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -279,12 +311,14 @@ export function DirectoriesView() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
+                    <th className="pb-3 font-semibold">Pro ID</th>
                     <th className="pb-3 font-semibold">Technician</th>
                     <th className="pb-3 font-semibold">Trade Specialty</th>
                     <th className="pb-3 font-semibold">Contact (Email & Mobile)</th>
                     <th className="pb-3 font-semibold">City Zone</th>
                     <th className="pb-3 font-semibold">Rating</th>
-                    <th className="pb-3 text-right font-semibold">KYC Compliance</th>
+                    <th className="pb-3 font-semibold">KYC Compliance</th>
+                    <th className="pb-3 text-right font-semibold">History</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -294,7 +328,12 @@ export function DirectoriesView() {
                     const mobile = pro.profile?.phone || pro.profile?.mobile || pro.mobile || "N/A";
 
                     return (
-                      <tr key={pro.id} className="hover:bg-slate-800/30">
+                      <tr key={pro.id} className="hover:bg-slate-800/30 transition">
+                        <td className="py-4">
+                          <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
+                            #{pro.id.slice(0, 8)}
+                          </span>
+                        </td>
                         <td className="py-4">
                           <div className="font-bold text-white flex items-center gap-2">
                             <div className="h-7 w-7 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase">
@@ -335,7 +374,7 @@ export function DirectoriesView() {
                             <span>{pro.rating ? Number(pro.rating).toFixed(1) : "5.0"}</span>
                           </div>
                         </td>
-                        <td className="py-4 text-right">
+                        <td className="py-4">
                           <span
                             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${
                               pro.kyc_status === "approved" || pro.status === "approved"
@@ -353,6 +392,23 @@ export function DirectoriesView() {
                             <span>{pro.kyc_status?.replace("_", " ") || pro.status}</span>
                           </span>
                         </td>
+                        <td className="py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setHistoryTarget({
+                                id: pro.id,
+                                name: fullName,
+                                email: email !== "N/A" ? email : undefined,
+                                role: "professional",
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 transition text-[11px] font-semibold inline-flex items-center gap-1"
+                          >
+                            <History className="h-3 w-3" />
+                            <span>View History</span>
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -362,6 +418,13 @@ export function DirectoriesView() {
           )}
         </div>
       )}
+
+      {/* User Booking History Drill-Down Modal */}
+      <UserBookingHistoryModal
+        isOpen={Boolean(historyTarget)}
+        targetUser={historyTarget}
+        onClose={() => setHistoryTarget(null)}
+      />
     </div>
   );
 }

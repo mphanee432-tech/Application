@@ -1,4 +1,4 @@
-import { createServerClient as createSSRServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient as createSSRServerClient, type CookieOptions, type CookieOptionsWithName } from "@supabase/ssr";
 import type { Database } from "../types";
 
 export type ServerSupabaseClient = ReturnType<typeof createSSRServerClient<Database, "public">>;
@@ -17,20 +17,27 @@ export interface CookieMethodsServer {
 export interface ServerConfig {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
+  appName?: string;
+  cookiePrefix?: string;
+  cookieOptions?: CookieOptionsWithName;
 }
 
 /**
  * Standardized Supabase server client using @supabase/ssr.
  * Accepts cookieStore adapter (e.g. from Next.js headers).
+ * Supports session isolation via appName or cookiePrefix.
  */
 export function createServerSupabaseClient(
   cookieStore?: CookieMethodsServer,
-  config?: ServerConfig
+  configOrAppName?: ServerConfig | string
 ): ServerSupabaseClient {
+  const config = typeof configOrAppName === "string" ? { appName: configOrAppName } : configOrAppName;
   const url = config?.supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anonKey = config?.supabaseAnonKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  const appName = config?.appName || config?.cookiePrefix || process.env.NEXT_PUBLIC_APP_NAME;
+  const cookieName = config?.cookieOptions?.name || (appName ? `sb-${appName}-auth-token` : undefined);
 
-  return createSSRServerClient<Database, "public">(url, anonKey, {
+  const clientOptions: any = {
     cookies: {
       getAll() {
         return cookieStore?.getAll ? cookieStore.getAll() : [];
@@ -41,20 +48,33 @@ export function createServerSupabaseClient(
         }
       },
     },
-  });
+  };
+
+  if (cookieName || config?.cookieOptions) {
+    clientOptions.cookieOptions = {
+      ...(config?.cookieOptions || {}),
+      ...(cookieName ? { name: cookieName } : {}),
+    };
+  }
+
+  return createSSRServerClient<Database, "public">(url, anonKey, clientOptions);
 }
 
 /**
- * Creates a server client directly by passing Next.js cookies() accessor
+ * Creates a server client directly by passing Next.js cookies() accessor.
+ * Supports session isolation via appName or cookiePrefix.
  */
 export function createNextServerClient(
   cookieStore: any,
-  config?: ServerConfig
+  configOrAppName?: ServerConfig | string
 ): ServerSupabaseClient {
+  const config = typeof configOrAppName === "string" ? { appName: configOrAppName } : configOrAppName;
   const url = config?.supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anonKey = config?.supabaseAnonKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  const appName = config?.appName || config?.cookiePrefix || process.env.NEXT_PUBLIC_APP_NAME;
+  const cookieName = config?.cookieOptions?.name || (appName ? `sb-${appName}-auth-token` : undefined);
 
-  return createSSRServerClient<Database, "public">(url, anonKey, {
+  const clientOptions: any = {
     cookies: {
       getAll() {
         return typeof cookieStore?.getAll === "function" ? cookieStore.getAll() : [];
@@ -71,7 +91,16 @@ export function createNextServerClient(
         }
       },
     },
-  });
+  };
+
+  if (cookieName || config?.cookieOptions) {
+    clientOptions.cookieOptions = {
+      ...(config?.cookieOptions || {}),
+      ...(cookieName ? { name: cookieName } : {}),
+    };
+  }
+
+  return createSSRServerClient<Database, "public">(url, anonKey, clientOptions);
 }
 
 /**

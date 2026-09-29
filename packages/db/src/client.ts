@@ -1,34 +1,52 @@
-import { createBrowserClient } from "@supabase/ssr";
+import { createBrowserClient, type CookieOptionsWithName } from "@supabase/ssr";
 import { createClient as createSupabaseJsClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
 export type TypedSupabaseClient = ReturnType<typeof createBrowserClient<Database, "public">>;
 
-let browserClient: TypedSupabaseClient | null = null;
+const browserClients: Record<string, TypedSupabaseClient> = {};
 
 export interface ClientConfig {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
+  appName?: string;
+  cookiePrefix?: string;
+  cookieOptions?: CookieOptionsWithName;
 }
 
 /**
- * Creates or retrieves a singleton standardized Supabase browser client using @supabase/ssr.
+ * Creates or retrieves a standardized Supabase browser client using @supabase/ssr.
+ * Supports session isolation via appName or cookiePrefix.
  * Used by User, Professional, and public Admin UI.
  */
-export function createBrowserSupabaseClient(config?: ClientConfig): TypedSupabaseClient {
+export function createBrowserSupabaseClient(
+  configOrAppName?: ClientConfig | string
+): TypedSupabaseClient {
+  const config = typeof configOrAppName === "string" ? { appName: configOrAppName } : configOrAppName;
   const url = config?.supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anonKey = config?.supabaseAnonKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  const appName = config?.appName || config?.cookiePrefix || process.env.NEXT_PUBLIC_APP_NAME;
+  const cookieName = config?.cookieOptions?.name || (appName ? `sb-${appName}-auth-token` : undefined);
+
+  const clientOptions: any = {};
+  if (cookieName || config?.cookieOptions) {
+    clientOptions.cookieOptions = {
+      ...(config?.cookieOptions || {}),
+      ...(cookieName ? { name: cookieName } : {}),
+    };
+  }
 
   if (typeof window === "undefined") {
     // If called on server without cookies, create standalone browser-compatible client
-    return createBrowserClient<Database, "public">(url, anonKey);
+    return createBrowserClient<Database, "public">(url, anonKey, clientOptions);
   }
 
-  if (!browserClient) {
-    browserClient = createBrowserClient<Database, "public">(url, anonKey);
+  const cacheKey = cookieName || "default";
+  if (!browserClients[cacheKey]) {
+    browserClients[cacheKey] = createBrowserClient<Database, "public">(url, anonKey, clientOptions);
   }
 
-  return browserClient;
+  return browserClients[cacheKey];
 }
 
 /**

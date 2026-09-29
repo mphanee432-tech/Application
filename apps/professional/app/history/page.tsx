@@ -9,7 +9,7 @@ export default function HistoryPage() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("professional"));
 
   useEffect(() => {
     async function loadHistory() {

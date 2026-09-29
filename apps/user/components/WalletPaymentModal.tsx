@@ -43,7 +43,7 @@ export function WalletPaymentModal({
   bookingData,
   onSuccess,
 }: WalletPaymentModalProps) {
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
   const [wallet, setWallet] = useState<Tables<"wallets"> | null>(null);
   const [loadingWallet, setLoadingWallet] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -87,7 +87,7 @@ export function WalletPaymentModal({
       const res = await topUpDemoBalance(500, supabase);
       if (res.success && typeof res.newBalance === "number") {
         setWallet((prev) => (prev ? { ...prev, balance: res.newBalance! } : null));
-        setSuccessMsg("Added $500.00 Demo Credits to your wallet!");
+        setSuccessMsg("Added ₹500.00 Demo Credits to your wallet!");
       } else {
         setError(res.error || "Failed to top up balance.");
       }
@@ -173,7 +173,7 @@ export function WalletPaymentModal({
           </div>
           <div className="pt-2 border-t border-slate-800/80 flex justify-between items-center">
             <span className="text-xs font-semibold text-slate-300">Total Order Amount:</span>
-            <span className="text-base font-bold text-white">${price.toFixed(2)}</span>
+            <span className="text-base font-bold text-white">₹{price.toFixed(2)}</span>
           </div>
         </div>
 
@@ -188,7 +188,7 @@ export function WalletPaymentModal({
               <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
             ) : (
               <span className="text-xs font-mono font-bold text-emerald-400">
-                ${currentBalance.toFixed(2)} Available
+                ₹{currentBalance.toFixed(2)} Available
               </span>
             )}
           </div>
@@ -211,7 +211,7 @@ export function WalletPaymentModal({
                 <span>
                   {hasSufficientFunds
                     ? "Sufficient demo credits for this booking"
-                    : `Short by $${deficit.toFixed(2)}`}
+                    : `Short by ₹${deficit.toFixed(2)}`}
                 </span>
               </div>
 
@@ -227,7 +227,7 @@ export function WalletPaymentModal({
                   ) : (
                     <PlusCircle className="h-3 w-3" />
                   )}
-                  <span>+ $500</span>
+                  <span>+ ₹500</span>
                 </button>
               )}
             </div>
@@ -264,7 +264,7 @@ export function WalletPaymentModal({
                 </>
               ) : (
                 <>
-                  <span>Pay & Confirm Booking (${price.toFixed(2)})</span>
+                  <span>Pay & Confirm Booking (₹{price.toFixed(2)})</span>
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}

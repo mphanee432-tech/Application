@@ -8,7 +8,6 @@ import {
   X,
   AlertCircle,
   Loader2,
-  DollarSign,
   ExternalLink,
   ShieldAlert,
 } from "lucide-react";
@@ -94,7 +93,7 @@ export function AddonApprovalModal({
               <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold block">
                 Added Cost
               </span>
-              <span className="text-base font-black text-emerald-400">+${cost}</span>
+              <span className="text-base font-black text-emerald-400">+₹{cost}</span>
             </div>
           </div>
 
@@ -164,7 +163,7 @@ export function AddonApprovalModal({
             ) : (
               <>
                 <Check className="h-4 w-4" />
-                <span>Approve (+${cost})</span>
+                <span>Approve (+₹{cost})</span>
               </>
             )}
           </button>
@@ -175,3 +174,4 @@ export function AddonApprovalModal({
 }
 
 export default AddonApprovalModal;
+

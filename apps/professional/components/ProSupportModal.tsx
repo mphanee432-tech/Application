@@ -40,7 +40,7 @@ const TICKET_CATEGORIES = [
 ];
 
 export function ProSupportModal({ isOpen, onClose }: ProSupportModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

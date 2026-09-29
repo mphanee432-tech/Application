@@ -28,7 +28,7 @@ export function UserProfileModal({
   onClose,
   onProfileUpdated,
 }: UserProfileModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("user");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

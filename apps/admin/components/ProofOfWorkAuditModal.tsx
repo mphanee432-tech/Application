@@ -30,7 +30,7 @@ export function ProofOfWorkAuditModal({
   booking,
   onClose,
 }: ProofOfWorkAuditModalProps) {
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("admin"));
   const [addons, setAddons] = useState<any[]>([]);
   const [loadingAddons, setLoadingAddons] = useState(false);
 

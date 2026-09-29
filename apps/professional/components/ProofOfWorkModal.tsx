@@ -48,7 +48,7 @@ export function ProofOfWorkModal({
     try {
       setUploading(true);
       setError(null);
-      const supabase = createBrowserSupabaseClient();
+      const supabase = createBrowserSupabaseClient("professional");
       const updatedBooking = await uploadProofOfWork(booking.id, beforeFile, afterFile, supabase);
       onSuccess(updatedBooking);
     } catch (err: any) {

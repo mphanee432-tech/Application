@@ -28,7 +28,7 @@ import {
 
 export default function UserSosPage() {
   const router = useRouter();
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("user"));
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);

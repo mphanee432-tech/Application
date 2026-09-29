@@ -16,7 +16,6 @@ import {
   Wallet,
   ArrowUpRight,
   ArrowDownLeft,
-  DollarSign,
   TrendingUp,
   Clock,
   CheckCircle2,
@@ -31,7 +30,7 @@ import {
 
 export default function ProfessionalWalletPage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
 
   const [user, setUser] = useState<any>(null);
   const [metrics, setMetrics] = useState<ProEarningsMetrics | null>(null);
@@ -114,12 +113,12 @@ export default function ProfessionalWalletPage() {
     e.preventDefault();
     const amountNum = parseFloat(payoutAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      setPayoutError("Please enter a valid payout amount greater than $0");
+      setPayoutError("Please enter a valid payout amount greater than ₹0");
       return;
     }
 
     if (metrics && amountNum > metrics.balance) {
-      setPayoutError(`Amount exceeds withdrawable balance of $${metrics.balance.toFixed(2)}`);
+      setPayoutError(`Amount exceeds withdrawable balance of ₹${metrics.balance.toFixed(2)}`);
       return;
     }
 
@@ -129,7 +128,7 @@ export default function ProfessionalWalletPage() {
       setPayoutSuccess(null);
 
       await requestPayoutPro(amountNum, supabase);
-      setPayoutSuccess(`Instant payout request of $${amountNum.toFixed(2)} submitted for admin processing!`);
+      setPayoutSuccess(`Instant payout request of ₹${amountNum.toFixed(2)} submitted for admin processing!`);
       setPayoutAmount("");
       if (user) await loadData(user.id);
     } catch (err: any) {
@@ -219,7 +218,7 @@ export default function ProfessionalWalletPage() {
               <span className="text-xs font-semibold uppercase">Today</span>
               <Clock className="h-4 w-4 text-emerald-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${today.toFixed(2)}</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{today.toFixed(2)}</p>
             <p className="mt-1 text-[11px] text-slate-500">Service fees + tips today</p>
           </div>
 
@@ -229,7 +228,7 @@ export default function ProfessionalWalletPage() {
               <span className="text-xs font-semibold uppercase">This Week</span>
               <Calendar className="h-4 w-4 text-blue-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${week.toFixed(2)}</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{week.toFixed(2)}</p>
             <p className="mt-1 text-[11px] text-slate-500">Rolling 7-day payouts</p>
           </div>
 
@@ -239,7 +238,7 @@ export default function ProfessionalWalletPage() {
               <span className="text-xs font-semibold uppercase">This Month</span>
               <TrendingUp className="h-4 w-4 text-indigo-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${month.toFixed(2)}</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{month.toFixed(2)}</p>
             <p className="mt-1 text-[11px] text-slate-500">Current calendar cycle</p>
           </div>
 
@@ -249,7 +248,7 @@ export default function ProfessionalWalletPage() {
               <span className="text-xs font-semibold uppercase">Lifetime</span>
               <Sparkles className="h-4 w-4 text-amber-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${lifetime.toFixed(2)}</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{lifetime.toFixed(2)}</p>
             <p className="mt-1 text-[11px] text-slate-500">All-time gross provider earnings</p>
           </div>
         </section>
@@ -264,8 +263,8 @@ export default function ProfessionalWalletPage() {
                 <Banknote className="h-5 w-5 text-emerald-400" />
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="text-4xl font-black text-white">${balance.toFixed(2)}</span>
-                <span className="text-xs font-bold text-emerald-400">USD</span>
+                <span className="text-4xl font-black text-white">₹{balance.toFixed(2)}</span>
+                <span className="text-xs font-bold text-emerald-400">INR</span>
               </div>
               <p className="mt-2 text-xs text-slate-400 leading-relaxed">
                 Available for instant transfer to your linked bank account or debit card.
@@ -275,11 +274,11 @@ export default function ProfessionalWalletPage() {
             <div className="mt-6 pt-4 border-t border-slate-800 text-xs text-slate-400 space-y-1">
               <div className="flex justify-between">
                 <span>Pending Payout Requests:</span>
-                <span className="font-bold text-amber-400">${(metrics?.pendingPayouts || 0).toFixed(2)}</span>
+                <span className="font-bold text-amber-400">₹{(metrics?.pendingPayouts || 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Platform Commission Rate:</span>
-                <span className="font-bold text-slate-300">15% Standard</span>
+                <span className="font-bold text-slate-300">20% Fee (80% Net Payout)</span>
               </div>
             </div>
           </div>
@@ -289,7 +288,7 @@ export default function ProfessionalWalletPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm font-bold text-white">
-                  <DollarSign className="h-4 w-4 text-emerald-400" />
+                  <span className="text-emerald-400 font-bold text-base">₹</span>
                   <span>Request Instant Provider Payout</span>
                 </div>
                 <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
@@ -326,7 +325,7 @@ export default function ProfessionalWalletPage() {
                       disabled={balance <= 0}
                       className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-800 bg-slate-800/70 hover:bg-slate-800 text-slate-300 disabled:opacity-50 transition"
                     >
-                      {ratio === 1.0 ? "Max (100%)" : `${ratio * 100}%`} (${val})
+                      {ratio === 1.0 ? "Max (100%)" : `${ratio * 100}%`} (₹{val})
                     </button>
                   );
                 })}
@@ -335,7 +334,7 @@ export default function ProfessionalWalletPage() {
               {/* Amount input */}
               <div className="relative mb-4">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">
-                  $
+                  ₹
                 </span>
                 <input
                   type="number"
@@ -363,7 +362,7 @@ export default function ProfessionalWalletPage() {
               ) : (
                 <>
                   <ArrowUpRight className="h-4 w-4" />
-                  <span>Request Payout of ${payoutAmount || "0.00"}</span>
+                  <span>Request Payout of ₹{payoutAmount || "0.00"}</span>
                 </>
               )}
             </button>
@@ -450,7 +449,7 @@ export default function ProfessionalWalletPage() {
                               isCredit ? "text-emerald-400" : "text-amber-400"
                             }`}
                           >
-                            {isCredit ? `+` : `-`}${amt.toFixed(2)}
+                            {isCredit ? `+` : `-`}₹{amt.toFixed(2)}
                           </td>
                         </tr>
                       );

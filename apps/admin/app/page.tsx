@@ -8,6 +8,7 @@ import {
   fetchAllBookingsAdmin,
   fetchAllProfessionalsAdmin,
   fetchAllReviewsAdmin,
+  fetchBookingDetails,
   getCurrentUser,
   getUnreadSupportCount,
   getActiveSosCountAdmin,
@@ -15,6 +16,7 @@ import {
 } from "@repo/db";
 import { approveProfessionalKyc } from "./actions";
 import { ProofOfWorkAuditModal } from "../components/ProofOfWorkAuditModal";
+import { BookingDetailModal } from "../components/BookingDetailModal";
 import { CatalogManager } from "../components/CatalogManager";
 import { DirectoriesView } from "../components/DirectoriesView";
 import { SupportHub } from "../components/SupportHub";
@@ -41,17 +43,19 @@ import {
   ShieldAlert,
   Wallet,
   Megaphone,
+  Eye,
 } from "lucide-react";
 
 export default function AdminPortal() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("admin");
 
   const [user, setUser] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [professionals, setProfessionals] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [auditBooking, setAuditBooking] = useState<any | null>(null);
+  const [detailBooking, setDetailBooking] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
@@ -91,6 +95,7 @@ export default function AdminPortal() {
   }
 
   useEffect(() => {
+    let isMounted = true;
     loadData();
 
     // Subscribe to changes on bookings, professionals, and reviews
@@ -99,21 +104,54 @@ export default function AdminPortal() {
       .on("postgres_changes", { event: "*", schema: "public", table: "bookings" }, () => {
         loadData();
       })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        (payload: any) => {
+          if (!isMounted) return;
+          if (payload.eventType === "INSERT" && payload.new) {
+            setBookings((prev) => [payload.new, ...prev.filter((b) => b.id !== payload.new.id)]);
+            fetchBookingDetails(payload.new.id, supabase).then((full) => {
+              if (full && isMounted) {
+                setBookings((prev) => prev.map((b) => (b.id === full.id ? full : b)));
+              }
+            });
+          } else if (payload.eventType === "UPDATE" && payload.new) {
+            setBookings((prev) =>
+              prev.map((b) => (b.id === payload.new.id ? { ...b, ...payload.new } : b))
+            );
+            if (payload.new.professional_id || payload.new.status) {
+              fetchBookingDetails(payload.new.id, supabase).then((full) => {
+                if (full && isMounted) {
+                  setBookings((prev) => prev.map((b) => (b.id === full.id ? full : b)));
+                }
+              });
+            }
+          } else if (payload.eventType === "DELETE" && payload.old) {
+            setBookings((prev) => prev.filter((b) => b.id !== payload.old.id));
+          }
+        }
+      )
       .on("postgres_changes", { event: "*", schema: "public", table: "professionals" }, () => {
         loadData();
+        if (isMounted) fetchAllProfessionalsAdmin().then(setProfessionals);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "reviews" }, () => {
         loadData();
+        if (isMounted) fetchAllReviewsAdmin(supabase).then(setReviews);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "sos_alerts" }, () => {
         getActiveSosCountAdmin(supabase).then(setActiveSosCount);
+        if (isMounted) getActiveSosCountAdmin(supabase).then(setActiveSosCount);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "ticket_replies" }, () => {
         getUnreadSupportCount(undefined, "admin", supabase).then(setUnreadSupportCount);
+        if (isMounted) getUnreadSupportCount(undefined, "admin", supabase).then(setUnreadSupportCount);
       })
       .subscribe();
 
     return () => {
+      isMounted = false;
       supabase.removeChannel(adminChannel);
     };
   }, []);
@@ -270,7 +308,7 @@ export default function AdminPortal() {
               <span className="text-xs text-slate-400">Total Bookings Volume</span>
               <DollarSign className="h-4 w-4 text-emerald-400" />
             </div>
-            <p className="mt-2 text-2xl font-black text-white">${totalVolume.toFixed(2)}</p>
+            <p className="mt-2 text-2xl font-black text-white">₹{totalVolume.toFixed(2)}</p>
             <p className="mt-1 text-[11px] text-slate-400">{bookings.length} total platform orders</p>
           </div>
 
@@ -444,21 +482,24 @@ export default function AdminPortal() {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
-                      <th className="pb-3 font-semibold">Booking ID</th>
+                      <th className="pb-3 font-semibold">Order ID</th>
                       <th className="pb-3 font-semibold">Service Type</th>
                       <th className="pb-3 font-semibold">Customer</th>
                       <th className="pb-3 font-semibold">Assigned Professional</th>
                       <th className="pb-3 font-semibold">Price</th>
                       <th className="pb-3 font-semibold">Status</th>
                       <th className="pb-3 font-semibold">Proof Photos</th>
-                      <th className="pb-3 text-right font-semibold">Time</th>
+                      <th className="pb-3 font-semibold">Time</th>
+                      <th className="pb-3 text-right font-semibold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {bookings.map((booking) => (
-                      <tr key={booking.id} className="hover:bg-slate-800/30">
-                        <td className="py-4 font-mono text-indigo-400 font-bold">
-                          #{booking.id.slice(0, 8)}
+                      <tr key={booking.id} className="hover:bg-slate-800/30 transition">
+                        <td className="py-4">
+                          <span className="font-mono text-indigo-400 font-bold bg-indigo-950/80 border border-indigo-800/80 px-2 py-0.5 rounded text-[11px]">
+                            #{booking.id.slice(0, 8)}
+                          </span>
                         </td>
                         <td className="py-4 font-bold text-white">{booking.service_type}</td>
                         <td className="py-4">
@@ -479,8 +520,8 @@ export default function AdminPortal() {
                             <span className="text-slate-500 italic">Unassigned (Broadcast)</span>
                           )}
                         </td>
-                        <td className="py-4 font-bold text-slate-200">
-                          ${Number(booking.price).toFixed(2)}
+                        <td className="py-4 font-bold text-slate-200 font-mono">
+                          ₹{Number(booking.price).toFixed(2)}
                         </td>
                         <td className="py-4">
                           <span
@@ -521,11 +562,21 @@ export default function AdminPortal() {
                             </span>
                           )}
                         </td>
-                        <td className="py-4 text-right text-[11px] text-slate-400">
+                        <td className="py-4 text-[11px] text-slate-400">
                           {new Date(booking.created_at).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
+                        </td>
+                        <td className="py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDetailBooking(booking)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600/20 border border-indigo-500/30 px-2.5 py-1 text-[11px] font-semibold text-indigo-300 hover:bg-indigo-600/30 transition shadow-sm"
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>View Details</span>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -716,7 +767,9 @@ export default function AdminPortal() {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400">
-                        <th className="pb-3 font-semibold">Review ID</th>
+                        <th className="pb-3 font-semibold">Order ID</th>
+                        <th className="pb-3 font-semibold">Review By</th>
+                        <th className="pb-3 font-semibold">User ID</th>
                         <th className="pb-3 font-semibold">Reviewer</th>
                         <th className="pb-3 font-semibold">Target / Recipient</th>
                         <th className="pb-3 font-semibold">Score</th>
@@ -729,6 +782,10 @@ export default function AdminPortal() {
                     <tbody className="divide-y divide-slate-800/60">
                       {reviews.map((rev) => {
                         const isDispute = rev.rating <= 2;
+                        const reviewerRole = rev.reviewer?.role || "customer";
+                        const orderId = rev.booking_id || rev.booking?.id || "N/A";
+                        const reviewerUserId = rev.reviewer_id || rev.reviewer?.id || "N/A";
+
                         return (
                           <tr
                             key={rev.id}
@@ -738,8 +795,26 @@ export default function AdminPortal() {
                                 : "hover:bg-slate-800/30"
                             }`}
                           >
-                            <td className="py-4 font-mono text-indigo-400 font-bold">
-                              #{rev.id.slice(0, 8)}
+                            <td className="py-4">
+                              <span className="font-mono text-indigo-400 font-bold bg-indigo-950/80 border border-indigo-800/80 px-2 py-0.5 rounded text-[11px]">
+                                #{orderId.slice(0, 8)}
+                              </span>
+                            </td>
+                            <td className="py-4">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase border ${
+                                  reviewerRole === "professional"
+                                    ? "bg-emerald-950 border-emerald-800 text-emerald-300"
+                                    : "bg-blue-950 border-blue-800 text-blue-300"
+                                }`}
+                              >
+                                {reviewerRole === "professional" ? "Professional" : "Customer"}
+                              </span>
+                            </td>
+                            <td className="py-4">
+                              <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                                #{reviewerUserId.slice(0, 8)}
+                              </span>
                             </td>
                             <td className="py-4">
                               <div className="font-bold text-white">
@@ -820,7 +895,7 @@ export default function AdminPortal() {
                                 </div>
                               ) : (
                                 <span className="text-slate-500 font-mono text-[10px]">
-                                  #{rev.booking_id.slice(0, 8)}
+                                  #{orderId.slice(0, 8)}
                                 </span>
                               )}
                             </td>
@@ -853,6 +928,17 @@ export default function AdminPortal() {
         isOpen={Boolean(auditBooking)}
         booking={auditBooking}
         onClose={() => setAuditBooking(null)}
+      />
+
+      {/* Booking Drill-Down Details Modal */}
+      <BookingDetailModal
+        isOpen={Boolean(detailBooking)}
+        booking={detailBooking}
+        onClose={() => setDetailBooking(null)}
+        onAuditProof={(b) => {
+          setDetailBooking(null);
+          setAuditBooking(b);
+        }}
       />
     </div>
   );

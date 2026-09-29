@@ -28,7 +28,7 @@ export default function KycOnboardingModal({
   onClose,
   onSuccess,
 }: KycOnboardingModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("professional");
 
   const [cities, setCities] = useState<Tables<"cities">[]>(propCities || []);
   const [services, setServices] = useState<Tables<"services">[]>(propServices || []);

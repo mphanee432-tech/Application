@@ -29,7 +29,7 @@ import {
 
 export default function ProfessionalSosPage() {
   const router = useRouter();
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const [supabase] = useState(() => createBrowserSupabaseClient("professional"));
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);

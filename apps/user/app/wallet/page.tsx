@@ -32,7 +32,7 @@ import {
 
 export default function UserWalletPage() {
   const router = useRouter();
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("user");
 
   const [user, setUser] = useState<any>(null);
   const [wallet, setWallet] = useState<Tables<"wallets"> | null>(null);

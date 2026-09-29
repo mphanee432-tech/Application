@@ -32,7 +32,7 @@ interface SupportTicketModalProps {
 }
 
 export function SupportTicketModal({ isOpen, onClose }: SupportTicketModalProps) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createBrowserSupabaseClient("user");
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
