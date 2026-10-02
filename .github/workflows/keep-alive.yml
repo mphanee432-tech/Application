@@ -1,1 +1,17 @@
+name: Keep Supabase Alive
 
+on:
+  schedule:
+    # Runs at 00:00 UTC every Wednesday (3) and Sunday (0)
+    - cron: '0 0 * * 0,3'
+  workflow_dispatch: # Enables the manual "Run workflow" button
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Database
+        run: |
+          curl -s -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/bookings?select=id&limit=1" \
+          -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
