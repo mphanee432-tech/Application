@@ -14,6 +14,7 @@ export default function ProfessionalLoginPage() {
   const [fullName, setFullName] = useState("");
   const [trade, setTrade] = useState("Plumbing");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -35,12 +36,17 @@ export default function ProfessionalLoginPage() {
               role: "professional",
               trade,
               license_number: licenseNumber,
+              phone,
             },
           },
         });
 
         if (error) throw error;
         if (data.session) {
+          // Save phone to profiles table
+          if (phone) {
+            await supabase.from("profiles").update({ phone }).eq("id", data.user?.id);
+          }
           router.push("/");
           router.refresh();
         } else {
@@ -160,6 +166,17 @@ export default function ProfessionalLoginPage() {
                   value={licenseNumber}
                   onChange={(e) => setLicenseNumber(e.target.value)}
                   placeholder="e.g. PL-CA-88902"
+                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Mobile Number (Optional)</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Mobile number (e.g. +91 98765 43210)"
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
                 />
               </div>

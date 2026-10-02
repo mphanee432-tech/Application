@@ -39,6 +39,10 @@ export default function UserLoginPage() {
 
         if (error) throw error;
         if (data.session) {
+          // Ensure phone is saved to profiles table
+          if (phone) {
+            await supabase.from("profiles").update({ phone }).eq("id", data.user?.id);
+          }
           router.push("/");
           router.refresh();
         } else {

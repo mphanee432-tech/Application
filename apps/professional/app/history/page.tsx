@@ -92,7 +92,7 @@ export default function HistoryPage() {
                   <div>
                     <p className="text-sm text-slate-500">Payout</p>
                     <p className={`text-2xl font-black ${job.status === 'completed' ? 'text-emerald-400' : 'text-slate-500 line-through'}`}>
-                      ${Number(job.price).toFixed(2)}
+                      ₹{Number(job.price).toFixed(2)}
                     </p>
                   </div>
                   <Link

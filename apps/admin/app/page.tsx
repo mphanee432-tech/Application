@@ -44,6 +44,7 @@ import {
   Wallet,
   Megaphone,
   Eye,
+  Search,
 } from "lucide-react";
 
 export default function AdminPortal() {
@@ -67,6 +68,9 @@ export default function AdminPortal() {
   const [unreadSupportCount, setUnreadSupportCount] = useState<number>(0);
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [bookingSearch, setBookingSearch] = useState("");
+  const [bookingPage, setBookingPage] = useState(1);
+  const BOOKINGS_PER_PAGE = 10;
 
   async function loadData() {
     setLoading(true);
@@ -449,20 +453,32 @@ export default function AdminPortal() {
         {/* Tab 1: Live Bookings Dispatch Snapshot */}
         {activeTab === "bookings" && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
               <div>
                 <h3 className="text-base font-bold text-white">Live Platform Bookings</h3>
                 <p className="text-xs text-slate-400">
                   Real-time snapshot: which customer booked, assigned professional, status, and proof-of-work
                 </p>
               </div>
-              <button
-                onClick={loadData}
-                className="flex items-center gap-1.5 text-xs text-indigo-400 hover:underline font-semibold"
-              >
-                <RefreshCw className="h-3 w-3" />
-                <span>Refresh Table</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={bookingSearch}
+                    onChange={(e) => { setBookingSearch(e.target.value); setBookingPage(1); }}
+                    placeholder="Search order ID..."
+                    className="rounded-xl border border-slate-700 bg-slate-900 pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none w-44"
+                  />
+                </div>
+                <button
+                  onClick={loadData}
+                  className="flex items-center gap-1.5 text-xs text-indigo-400 hover:underline font-semibold"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  <span>Refresh Table</span>
+                </button>
+              </div>
             </div>
 
             {loading ? (
@@ -494,7 +510,10 @@ export default function AdminPortal() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {bookings.map((booking) => (
+                    {bookings
+                      .filter((b) => !bookingSearch.trim() || b.id.toLowerCase().includes(bookingSearch.toLowerCase()))
+                      .slice((bookingPage - 1) * BOOKINGS_PER_PAGE, bookingPage * BOOKINGS_PER_PAGE)
+                      .map((booking) => (
                       <tr key={booking.id} className="hover:bg-slate-800/30 transition">
                         <td className="py-4">
                           <span className="font-mono text-indigo-400 font-bold bg-indigo-950/80 border border-indigo-800/80 px-2 py-0.5 rounded text-[11px]">

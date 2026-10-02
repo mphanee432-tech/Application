@@ -125,7 +125,7 @@ export default function UserWalletPage() {
     e.preventDefault();
     const amountNum = parseFloat(depositAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      setDepositError("Please enter a valid amount greater than $0");
+      setDepositError("Please enter a valid amount greater than ₹0");
       return;
     }
 
@@ -136,7 +136,7 @@ export default function UserWalletPage() {
 
       const res = await depositWalletFunds(amountNum, supabase);
       setWallet(res.wallet);
-      setDepositSuccess(`Successfully added $${amountNum.toFixed(2)} to your wallet!`);
+      setDepositSuccess(`Successfully added ₹${amountNum.toFixed(2)} to your wallet!`);
       if (user) await loadWalletData(user.id);
     } catch (err: any) {
       setDepositError(err.message || "Failed to process deposit");
@@ -156,7 +156,7 @@ export default function UserWalletPage() {
 
       const res = await redeemPromoCode(promoCode.trim(), supabase);
       setWallet(res.wallet);
-      setPromoSuccess(`🎉 Success! +$${res.amount.toFixed(2)} bonus credits added to your wallet.`);
+      setPromoSuccess(`🎉 Success! +₹${res.amount.toFixed(2)} bonus credits added to your wallet.`);
       setPromoCode("");
       if (user) await loadWalletData(user.id);
     } catch (err: any) {
@@ -174,7 +174,7 @@ export default function UserWalletPage() {
       const res = await topUpDemoBalance(500, supabase);
       if (res.success && typeof res.newBalance === "number") {
         setWallet((prev) => (prev ? { ...prev, balance: res.newBalance! } : null));
-        setDemoTopUpMsg("⚡ Added $500.00 Demo Credits to your balance!");
+        setDemoTopUpMsg("⚡ Added ₹500.00 Demo Credits to your balance!");
         if (user) await loadWalletData(user.id);
       } else {
         setDepositError(res.error || "Failed to top up demo balance.");
@@ -261,7 +261,7 @@ export default function UserWalletPage() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="text-4xl font-extrabold text-white">
-                  ${totalPurchasingPower.toFixed(2)}
+                  ₹{totalPurchasingPower.toFixed(2)}
                 </span>
                 <span className="text-xs font-bold text-blue-400">{wallet?.currency || "USD"}</span>
               </div>
@@ -282,7 +282,7 @@ export default function UserWalletPage() {
                 ) : (
                   <PlusCircle className="h-3.5 w-3.5" />
                 )}
-                <span>⚡ Top-Up Demo Balance (+$500.00)</span>
+                <span>⚡ Top-Up Demo Balance (+₹500.00)</span>
               </button>
               {demoTopUpMsg && (
                 <p className="mt-2 text-[11px] font-semibold text-emerald-400 text-center">
@@ -300,7 +300,7 @@ export default function UserWalletPage() {
             </div>
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-3xl font-bold text-emerald-400">
-                ${balance.toFixed(2)}
+                ₹{balance.toFixed(2)}
               </span>
               <span className="text-xs text-slate-500">Deposited funds</span>
             </div>
@@ -317,7 +317,7 @@ export default function UserWalletPage() {
             </div>
             <div className="mt-4 flex items-baseline gap-2">
               <span className="text-3xl font-bold text-amber-400">
-                ${promoCredits.toFixed(2)}
+                ₹{promoCredits.toFixed(2)}
               </span>
               <span className="text-xs text-slate-500">Bonus credits</span>
             </div>
@@ -367,7 +367,7 @@ export default function UserWalletPage() {
                         : "border-slate-800 bg-slate-800/70 text-slate-300 hover:bg-slate-800"
                     }`}
                   >
-                    +${amt}
+                    +₹{amt}
                   </button>
                 ))}
               </div>
@@ -375,7 +375,7 @@ export default function UserWalletPage() {
               {/* Amount Input */}
               <div className="relative mb-4">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">
-                  $
+                  ₹
                 </span>
                 <input
                   type="number"
@@ -402,7 +402,7 @@ export default function UserWalletPage() {
               ) : (
                 <>
                   <PlusCircle className="h-4 w-4" />
-                  <span>Deposit ${depositAmount || "0"} to Wallet</span>
+                  <span>Deposit ₹{depositAmount || "0"} to Wallet</span>
                 </>
               )}
             </button>
@@ -445,7 +445,7 @@ export default function UserWalletPage() {
                       className="px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-mono font-bold transition flex items-center gap-1.5"
                     >
                       <span>{code}</span>
-                      <span className="text-[10px] text-amber-300/80">(+${details.credits})</span>
+                      <span className="text-[10px] text-amber-300/80">(+₹{details.credits})</span>
                     </button>
                   ))}
                 </div>
@@ -559,7 +559,7 @@ export default function UserWalletPage() {
                               isCredit ? "text-emerald-400" : "text-slate-100"
                             }`}
                           >
-                            {isCredit ? `+` : `-`}${amt.toFixed(2)}
+                            {isCredit ? `+` : `-`}₹{amt.toFixed(2)}
                           </td>
                         </tr>
                       );

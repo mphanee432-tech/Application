@@ -349,55 +349,11 @@ export function AddServicePartDrawer({
         <form onSubmit={handleSubmit} className="space-y-4 pt-2 border-t border-slate-800">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold text-slate-200">Propose New Add-on</h4>
-            <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
-              <button
-                type="button"
-                onClick={() => setMode("custom")}
-                className={`px-2.5 py-1 rounded-md transition ${
-                  mode === "custom"
-                    ? "bg-emerald-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Custom Work / Parts
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("catalog")}
-                className={`px-2.5 py-1 rounded-md transition ${
-                  mode === "catalog"
-                    ? "bg-emerald-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Catalog Item
-              </button>
-            </div>
           </div>
 
-          {mode === "catalog" ? (
-            <div>
+          <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Select Catalog Service
-              </label>
-              <select
-                value={selectedServiceId}
-                onChange={handleCatalogSelect}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
-                required
-              >
-                <option value="">-- Choose catalog service --</option>
-                {catalogServices.map((svc) => (
-                  <option key={svc.id} value={svc.id}>
-                    {svc.name} (₹{Number(svc.base_price || 0).toFixed(2)})
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Add-on Description & Scope
+                Add-on Description &amp; Scope
               </label>
               <input
                 type="text"
@@ -408,7 +364,6 @@ export function AddServicePartDrawer({
                 required
               />
             </div>
-          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">

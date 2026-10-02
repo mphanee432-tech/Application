@@ -630,10 +630,11 @@ export default function ProfessionalPortal() {
                         </div>
                         <h2 className="mt-2 text-lg font-bold text-white">{job.service_type || job.services?.name}</h2>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700/80 text-xs">
-                            <User className="h-3.5 w-3.5 text-blue-400" />
-                            <span className="font-bold text-white">
-                              {job.customer?.full_name || "Homeowner"}
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-950/80 border border-blue-800 text-xs shadow-sm">
+                            <User className="h-4 w-4 text-blue-400" />
+                            <span className="text-slate-400 font-medium">Customer:</span>
+                            <span className="font-bold text-white text-sm">
+                              {job.customer?.full_name || "Homeowner Client"}
                             </span>
                           </div>
                           {(job.customer?.phone || job.customer?.mobile) && (
