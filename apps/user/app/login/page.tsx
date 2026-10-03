@@ -37,11 +37,14 @@ export default function UserLoginPage() {
           },
         });
 
-        if (error) throw error;
-        if (data.session) {
+        if (data.session && data.user) {
           // Ensure phone is saved to profiles table
-          if (phone) {
-            await supabase.from("profiles").update({ phone }).eq("id", data.user?.id);
+          const userPhone = phone.trim() || "";
+          if (userPhone) {
+            await (supabase as any)
+              .from("profiles")
+              .update({ phone: userPhone, mobile: userPhone })
+              .eq("id", data.user.id);
           }
           router.push("/");
           router.refresh();

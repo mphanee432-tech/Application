@@ -65,6 +65,27 @@ export type Database = {
           },
         ]
       }
+      ai_bot_configs: {
+        Row: {
+          id: string
+          model: string
+          system_prompt: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          model?: string
+          system_prompt: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          model?: string
+          system_prompt?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bookings: {
         Row: {
           address: string | null

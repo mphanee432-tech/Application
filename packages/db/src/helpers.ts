@@ -3121,3 +3121,361 @@ export async function processWalletPayment(
   }
 }
 
+/* ==========================================================================
+   AI COPILOT & PROMPT GOVERNANCE HELPERS
+   ========================================================================== */
+
+export interface BotConfig {
+  id: string;
+  system_prompt: string;
+  model: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system" | "model";
+  content: string;
+}
+
+export const DEFAULT_COPILOT_PROMPT =
+  "You are the Universal Admin AI Copilot for the Home Services Platform (HomeServe). Your job is to assist platform operations admins with real-time operational insights, booking dispatch summaries, payout oversight, customer dispute analysis, and drafting professional customer support responses. When providing financial figures, format them using Indian Rupees (₹). Always be precise, professional, concise, and helpful.";
+
+/**
+ * Fetch the current AI Copilot configuration from ai_bot_configs table.
+ */
+export async function fetchCopilotConfig(
+  customClient?: TypedSupabaseClient
+): Promise<BotConfig> {
+  const client = (customClient ?? createBrowserSupabaseClient("admin")) as any;
+
+  const { data, error } = await client
+    .from("ai_bot_configs")
+    .select("*")
+    .eq("id", "admin_copilot")
+    .maybeSingle();
+
+  if (error) {
+    console.warn("fetchCopilotConfig error:", error.message);
+  }
+
+  if (data) {
+    return data as BotConfig;
+  }
+
+  return {
+    id: "admin_copilot",
+    system_prompt: DEFAULT_COPILOT_PROMPT,
+    model: "gemini-1.5-pro",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Update the system prompt for the admin_copilot record.
+ */
+export async function updateCopilotPrompt(
+  newPrompt: string,
+  customClient?: TypedSupabaseClient
+): Promise<BotConfig> {
+  const client = (customClient ?? createBrowserSupabaseClient("admin")) as any;
+
+  const { data, error } = await client
+    .from("ai_bot_configs")
+    .upsert(
+      {
+        id: "admin_copilot",
+        system_prompt: newPrompt,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    )
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update copilot prompt: ${error.message}`);
+  }
+
+  return data as BotConfig;
+}
+
+/**
+ * Fetch a real-time operational snapshot across bookings, tickets, and finances.
+ */
+export async function fetchAdminOperationsContext(
+  customClient?: TypedSupabaseClient
+): Promise<string> {
+  try {
+    const client = (customClient ?? createBrowserSupabaseClient("admin")) as any;
+
+    const [bookingsRes, ticketsRes, transactionsRes, sosRes] = await Promise.all([
+      client
+        .from("bookings")
+        .select("id, status, price, cancellation_reason, created_at, services(name), profiles:customer_id(full_name)")
+        .order("created_at", { ascending: false })
+        .limit(15),
+      client
+        .from("support_tickets")
+        .select("id, subject, status, priority, description, category, created_at")
+        .order("created_at", { ascending: false })
+        .limit(10),
+      client
+        .from("transactions")
+        .select("id, type, amount, status, description, created_at")
+        .order("created_at", { ascending: false })
+        .limit(10),
+      client
+        .from("sos_alerts")
+        .select("id, status, emergency_type, location, created_at")
+        .eq("status", "active")
+        .limit(5),
+    ]);
+
+    const bookings = bookingsRes.data || [];
+    const tickets = ticketsRes.data || [];
+    const transactions = transactionsRes.data || [];
+    const sosAlerts = sosRes.data || [];
+
+    const pendingCount = bookings.filter((b: any) => b.status === "pending").length;
+    const activeCount = bookings.filter((b: any) =>
+      ["accepted", "en_route", "arrived", "in_progress"].includes(b.status)
+    ).length;
+    const cancelledCount = bookings.filter((b: any) => b.status === "cancelled").length;
+    const completedCount = bookings.filter((b: any) => b.status === "completed").length;
+
+    let context = `=== CURRENT REAL-TIME PLATFORM SNAPSHOT ===\n`;
+    context += `Snapshot Time: ${new Date().toISOString()}\n\n`;
+
+    context += `--- BOOKINGS OVERVIEW ---\n`;
+    context += `Total Queried: ${bookings.length} | Pending: ${pendingCount} | Active Field Dispatches: ${activeCount} | Completed: ${completedCount} | Cancelled: ${cancelledCount}\n`;
+    context += `Recent Orders:\n`;
+    if (bookings.length === 0) {
+      context += `(No bookings recorded yet)\n`;
+    } else {
+      bookings.slice(0, 8).forEach((b: any) => {
+        const orderId = b.id ? b.id.slice(0, 8) : "N/A";
+        const service = b.services?.name || "General Service";
+        const customer = b.profiles?.full_name || "Customer";
+        const price = b.price != null ? `₹${Number(b.price).toFixed(2)}` : "₹0.00";
+        const cancelNote = b.cancellation_reason ? ` (Reason: "${b.cancellation_reason}")` : "";
+        context += `• Order #${orderId}: ${service} (${price}) | Status: ${b.status} | Customer: ${customer}${cancelNote}\n`;
+      });
+    }
+
+    context += `\n--- SUPPORT TICKETS ---\n`;
+    const openTickets = tickets.filter((t: any) => t.status !== "resolved" && t.status !== "closed");
+    context += `Open/Pending Tickets: ${openTickets.length} of ${tickets.length} total\n`;
+    if (tickets.length === 0) {
+      context += `(No tickets recorded)\n`;
+    } else {
+      tickets.slice(0, 6).forEach((t: any) => {
+        const tId = t.id ? t.id.slice(0, 8) : "N/A";
+        context += `• Ticket #${tId}: "${t.subject || "No subject"}" | Status: ${t.status} | Priority: ${t.priority || "normal"} | Desc: ${t.description?.slice(0, 80) || "N/A"}\n`;
+      });
+    }
+
+    context += `\n--- FINANCIALS & RECENT PAYOUTS ---\n`;
+    const pendingPayouts = transactions.filter(
+      (tx: any) => tx.type === "payout" && tx.status === "pending"
+    );
+    context += `Pending Professional Payouts: ${pendingPayouts.length}\n`;
+    transactions.slice(0, 6).forEach((tx: any) => {
+      const amt = tx.amount != null ? `₹${Number(tx.amount).toFixed(2)}` : "₹0.00";
+      context += `• Tx #${tx.id?.slice(0, 8)}: ${tx.type} (${amt}) | Status: ${tx.status} | "${tx.description || ""}"\n`;
+    });
+
+    context += `\n--- EMERGENCY SOS STATUS ---\n`;
+    if (sosAlerts.length === 0) {
+      context += `• 0 active emergency alerts. All field operations nominal.\n`;
+    } else {
+      context += `• ⚠️ ${sosAlerts.length} ACTIVE EMERGENCY ALERT(S) REQUIRING IMMEDIATE ATTENTION!\n`;
+      sosAlerts.forEach((a: any) => {
+        context += `  - Alert #${a.id?.slice(0, 8)}: Type "${a.emergency_type || "SOS"}"\n`;
+      });
+    }
+
+    context += `===========================================`;
+    return context;
+  } catch (err: any) {
+    console.error("fetchAdminOperationsContext error:", err);
+    return `Operational snapshot unavailable: ${err?.message || "Unknown error"}`;
+  }
+}
+
+/**
+ * Call the LLM (Gemini / OpenAI) with prompt, real-time context, and conversation history.
+ */
+export async function callCopilotLLM(params: {
+  systemPrompt: string;
+  context: string;
+  messages: ChatMessage[];
+  model?: string;
+}): Promise<string> {
+  const { systemPrompt, context, messages, model = "gemini-1.5-pro" } = params;
+
+  // Retrieve API key from environment
+  const apiKey =
+    process.env.AI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.OPENAI_API_KEY;
+
+  const fullSystemInstruction = `${systemPrompt}\n\n${context}\n\nInstructions for your response:
+1. Ground your answers in the real-time operational context provided above whenever relevant.
+2. If the user asks about bookings, dispatches, tickets, cancellations, or payouts, reference specific details from the snapshot.
+3. If drafting a customer support response, maintain an empathetic, reassuring, professional tone representing HomeServe.
+4. Format all monetary values in Indian Rupees (₹).
+5. Format your output using clear markdown (bullet points, bold highlights, and headers).`;
+
+  // Fallback if no API key is supplied in .env
+  if (!apiKey) {
+    const lastUserMsg =
+      [...messages].reverse().find((m) => m.role === "user")?.content || "";
+
+    return generateSimulatedResponse(lastUserMsg, context);
+  }
+
+  // Check if API key is OpenAI or model is GPT
+  const isOpenAI =
+    apiKey.startsWith("sk-") ||
+    model.startsWith("gpt-") ||
+    (!process.env.AI_API_KEY && !!process.env.OPENAI_API_KEY);
+
+  if (isOpenAI) {
+    try {
+      const openAiMessages = [
+        { role: "system", content: fullSystemInstruction },
+        ...messages.map((m) => ({
+          role: m.role === "assistant" || m.role === "model" ? "assistant" : "user",
+          content: m.content,
+        })),
+      ];
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model.startsWith("gpt-") ? model : "gpt-4o",
+          messages: openAiMessages,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`OpenAI API error (${res.status}): ${errText}`);
+      }
+
+      const data = await res.json();
+      return (
+        data.choices?.[0]?.message?.content ||
+        "I received an empty response from the OpenAI API."
+      );
+    } catch (err: any) {
+      console.error("OpenAI call failed:", err);
+      return `❌ AI Provider Error: ${err.message || "Failed calling OpenAI API"}`;
+    }
+  }
+
+  // Google Gemini API Gateway (v1beta REST)
+  try {
+    const geminiModel = model.startsWith("gemini-") ? model : "gemini-1.5-pro";
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+
+    const geminiContents = messages.map((m) => ({
+      role: m.role === "assistant" || m.role === "model" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+    const payload = {
+      systemInstruction: {
+        parts: [{ text: fullSystemInstruction }],
+      },
+      contents: geminiContents.length > 0
+        ? geminiContents
+        : [{ role: "user", parts: [{ text: "Hello! Provide an operations summary." }] }],
+      generationConfig: {
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+      },
+    };
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      // If gemini-1.5-pro returns 404, fallback to gemini-2.5-flash
+      if (res.status === 404 && geminiModel !== "gemini-2.5-flash") {
+        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const fallbackRes = await fetch(fallbackEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          return (
+            fallbackData.candidates?.[0]?.content?.parts?.[0]?.text ||
+            "No textual response generated by Gemini."
+          );
+        }
+      }
+      throw new Error(`Gemini API error (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!replyText) {
+      return "I processed your request, but the model generated no content. Please try rephrasing.";
+    }
+    return replyText;
+  } catch (err: any) {
+    console.error("Gemini call failed:", err);
+    return `❌ AI Provider Error: ${err.message || "Failed calling Gemini API"}`;
+  }
+}
+
+/**
+ * Intelligent deterministic response generator when no external AI_API_KEY is configured.
+ */
+function generateSimulatedResponse(userQuery: string, context: string): string {
+  const queryLower = userQuery.toLowerCase();
+
+  let response = `> 💡 **Notice:** \`AI_API_KEY\` is not currently set in \`.env.local\`. Using live operational database telemetry to answer:\n\n`;
+
+  if (queryLower.includes("cancel") || queryLower.includes("cancellation")) {
+    response += `### 📋 Cancelled Bookings Report\n\n`;
+    response += `Based on the real-time operations database:\n`;
+    response += `- We scanned the recent platform bookings.\n`;
+    response += `- Cancelled bookings are logged with customer details and recorded reasons in the operational ledger.\n\n`;
+    response += `**Operational Insights:**\n`;
+    response += `Check the full details from the live snapshot:\n\`\`\`\n${context.slice(0, 600)}...\n\`\`\``;
+  } else if (queryLower.includes("ticket") || queryLower.includes("support") || queryLower.includes("refund")) {
+    response += `### ✍️ Draft Support Resolution Response\n\n`;
+    response += `**Subject:** Update regarding your HomeServe request\n\n`;
+    response += `Dear Customer,\n\n`;
+    response += `Thank you for reaching out to HomeServe Operations Support. We have carefully reviewed your service request and account history.\n\n`;
+    response += `Our platform operations team has noted your feedback regarding the service execution. We are committed to upholding verified quality standards across all home repairs and installations.\n\n`;
+    response += `If a refund or credit adjustment is warranted per our platform terms, the approved amount will be credited back to your HomeServe wallet within 24 hours.\n\n`;
+    response += `Warm regards,\n**HomeServe Support Operations Team**`;
+  } else if (queryLower.includes("payout") || queryLower.includes("finance") || queryLower.includes("money")) {
+    response += `### 💰 Financials & Professional Payouts Summary\n\n`;
+    response += `Our platform enforces the **80/20 cash flow split** (80% net earnings to professionals, 20% platform commission).\n\n`;
+    response += `Review pending payout requests in the **Financials & Ledger** tab (\`/finance\`) for manual disbursement authorization.`;
+  } else {
+    response += `### 📊 Real-Time Operations Summary\n\n`;
+    response += `Here is the current platform status retrieved directly from the database:\n\n`;
+    response += `${context}\n\n`;
+    response += `*Tip: Configure \`AI_API_KEY=your_gemini_api_key\` in \`.env.local\` to enable dynamic reasoning with Google Gemini.*`;
+  }
+
+  return response;
+}
+
+

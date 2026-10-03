@@ -6,6 +6,11 @@ import {
   fetchAllCustomersAdmin as fetchCusts,
   sendAdminBroadcast,
   approvePayoutAdmin as approvePayoutHelper,
+  fetchCopilotConfig,
+  updateCopilotPrompt,
+  fetchAdminOperationsContext,
+  callCopilotLLM,
+  DEFAULT_COPILOT_PROMPT,
 } from "@repo/db";
 import { revalidatePath } from "next/cache";
 
@@ -202,6 +207,126 @@ export async function acknowledgeSosAlertAction(alertId: string, resolvedBy?: st
     return {
       success: false,
       error: err?.message || "Failed to acknowledge SOS alert.",
+    };
+  }
+}
+
+/**
+ * Server Action: Get active Copilot configuration (system prompt and model)
+ */
+export async function getCopilotConfigAction() {
+  try {
+    const adminClient = getAdminClient();
+    const config = await fetchCopilotConfig(adminClient as any);
+    return { success: true, data: config };
+  } catch (err: any) {
+    console.error("getCopilotConfigAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to retrieve Copilot configuration.",
+    };
+  }
+}
+
+/**
+ * Server Action: Update the system prompt for the admin_copilot record
+ */
+export async function updateCopilotPromptAction(newPrompt: string) {
+  try {
+    if (!newPrompt || typeof newPrompt !== "string" || !newPrompt.trim()) {
+      return { success: false, error: "System prompt cannot be empty." };
+    }
+    const adminClient = getAdminClient();
+    const updated = await updateCopilotPrompt(newPrompt.trim(), adminClient as any);
+    revalidatePath("/ai-copilot");
+    return { success: true, data: updated };
+  } catch (err: any) {
+    console.error("updateCopilotPromptAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to update Copilot system prompt.",
+    };
+  }
+}
+
+/**
+ * Server Action: Send conversation history with system prompt & operations context to OpenRouter API
+ */
+export async function chatWithCopilotAction(
+  messages: { role: string; content: string }[]
+) {
+  try {
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return { success: false, error: "No chat messages provided." };
+    }
+
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return {
+        success: false,
+        error: "OpenRouter API key is missing in environment variables.",
+      };
+    }
+
+    const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+
+    const adminClient = getAdminClient();
+
+    // 1. Fetch live system prompt and model
+    const config = await fetchCopilotConfig(adminClient as any);
+
+    // 2. Query real-time database operations context
+    const opsContext = await fetchAdminOperationsContext(adminClient as any);
+
+    const systemPrompt = `${config.system_prompt || DEFAULT_COPILOT_PROMPT}\n\n${opsContext}`;
+
+    // 3. Format message roles
+    const conversationMessages = messages.map((m) => ({
+      role: m.role === "assistant" || m.role === "model" ? "assistant" : "user",
+      content: m.content || "",
+    }));
+
+    // 4. Send POST request to OpenRouter API
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3002",
+        "X-Title": "Home Services Admin",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...conversationMessages,
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return {
+        success: false,
+        error: `OpenRouter API error (${response.status}): ${errText}`,
+      };
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+
+    return {
+      success: true,
+      reply: content,
+      data: {
+        reply: content,
+      },
+    };
+  } catch (err: any) {
+    console.error("chatWithCopilotAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed processing Copilot response.",
     };
   }
 }

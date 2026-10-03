@@ -45,6 +45,7 @@ import {
   Megaphone,
   Eye,
   Search,
+  Sparkles,
 } from "lucide-react";
 
 export default function AdminPortal() {
@@ -220,6 +221,15 @@ export default function AdminPortal() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              href="/ai-copilot"
+              className="flex items-center gap-1.5 rounded-lg border border-purple-700/60 bg-purple-950/60 px-3 py-1.5 text-xs font-bold text-purple-300 shadow-sm hover:bg-purple-900/80 transition"
+              title="Universal Admin AI Copilot"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+              <span className="hidden sm:inline">AI Copilot</span>
+            </Link>
+
             <Link
               href="/campaigns"
               className="flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-300 shadow-sm hover:bg-indigo-900/80 transition"
@@ -447,6 +457,14 @@ export default function AdminPortal() {
           >
             <Megaphone className="h-3.5 w-3.5 text-indigo-400" />
             <span>Campaigns & Broadcasts</span>
+          </Link>
+
+          <Link
+            href="/ai-copilot"
+            className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-purple-400 hover:text-purple-300 transition shrink-0"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+            <span>AI Copilot</span>
           </Link>
         </div>
 

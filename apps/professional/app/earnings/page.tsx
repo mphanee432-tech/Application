@@ -64,7 +64,7 @@ export default function EarningsPage() {
       setPayoutMsg(null);
 
       // Insert a payout transaction
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from("transactions")
         .insert({
           user_id: user?.id,
