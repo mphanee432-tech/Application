@@ -1,7 +1,9 @@
 "use server";
 
+import { cookies } from "next/headers";
 import {
   createAdminClient,
+  createNextServerClient,
   fetchAllProfessionalsAdmin as fetchPros,
   fetchAllCustomersAdmin as fetchCusts,
   sendAdminBroadcast,
@@ -81,40 +83,227 @@ export async function fetchAllCustomersAdmin() {
 }
 
 /**
- * Server Action: Ensure the first admin gets the super_admin role
+ * Server Action: Ensure the admin role is properly provisioned.
+ * If user email is phani9119@gmail.com, assigns 'super_admin'.
+ * Any other user receives 'staff'.
  */
-export async function ensureSuperAdminRole(userId: string) {
+export async function ensureAdminRole(
+  userId: string,
+  email?: string
+): Promise<{ assigned: boolean; role: "super_admin" | "staff" }> {
   const adminClient = getAdminClient();
 
-  // Check if any admin exists
-  const { data: existing, error: fetchErr } = await adminClient
-    .from("admins")
-    .select("id")
-    .limit(1);
+  const isSuperAdminEmail = email?.toLowerCase().trim() === "phani9119@gmail.com";
+  const targetRole: "super_admin" | "staff" = isSuperAdminEmail ? "super_admin" : "staff";
 
-  if (fetchErr) {
-    throw new Error(`Failed checking existing admins: ${fetchErr.message}`);
-  }
-
-  if (!existing || existing.length === 0) {
-    const { error: insertErr } = await adminClient
-      .from("admins")
-      .insert({ id: userId, role: "super_admin" });
-
-    if (insertErr) {
-      throw new Error(`Failed to assign initial super_admin role: ${insertErr.message}`);
-    }
-
-    return { assigned: true, role: "super_admin" };
-  }
-
+  // Check if user already exists in admins table
   const { data: userAdmin } = await adminClient
     .from("admins")
     .select("role")
     .eq("id", userId)
     .maybeSingle();
 
-  return { assigned: false, role: userAdmin?.role || "standard" };
+  if (userAdmin) {
+    if (isSuperAdminEmail && userAdmin.role !== "super_admin") {
+      await adminClient
+        .from("admins")
+        .update({ role: "super_admin" })
+        .eq("id", userId);
+      return { assigned: true, role: "super_admin" };
+    }
+    return {
+      assigned: false,
+      role: userAdmin.role === "super_admin" ? "super_admin" : "staff",
+    };
+  }
+
+  // Insert fresh admin record with targetRole
+  const { error: insertErr } = await adminClient
+    .from("admins")
+    .insert({ id: userId, role: targetRole });
+
+  if (insertErr) {
+    // If conflict, ensure targetRole is set
+    await adminClient
+      .from("admins")
+      .update({ role: targetRole })
+      .eq("id", userId);
+  }
+
+  return { assigned: true, role: targetRole };
+}
+
+/**
+ * Backward-compatible wrapper for ensureSuperAdminRole
+ */
+export async function ensureSuperAdminRole(userId: string, email?: string) {
+  return ensureAdminRole(userId, email);
+}
+
+/**
+ * Server Action: Get the currently authenticated admin user's role ('super_admin' | 'staff')
+ */
+export async function getAdminUserRoleAction(): Promise<{
+  success: boolean;
+  role: "super_admin" | "staff";
+  email?: string;
+  userId?: string;
+}> {
+  try {
+    const cookieStore = await cookies();
+    const supabase = createNextServerClient(cookieStore, "admin");
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error || !user) {
+      return { success: false, role: "staff" };
+    }
+
+    const email = user.email?.toLowerCase().trim();
+    if (email === "phani9119@gmail.com") {
+      return { success: true, role: "super_admin", email, userId: user.id };
+    }
+
+    // Query adminClient to bypass RLS and get true role from admins table
+    const adminClient = getAdminClient();
+    const { data: adminRecord } = await adminClient
+      .from("admins")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (adminRecord && adminRecord.role === "super_admin") {
+      return { success: true, role: "super_admin", email, userId: user.id };
+    }
+
+    return { success: true, role: "staff", email, userId: user.id };
+  } catch (err: any) {
+    console.error("getAdminUserRoleAction error:", err);
+    return { success: false, role: "staff" };
+  }
+}
+
+/**
+ * Server Action: Authenticate an admin user and immediately bust Vercel router cache
+ */
+export async function adminLoginAction(params: {
+  email: string;
+  password: string;
+}) {
+  try {
+    const cookieStore = await cookies();
+    const supabase = createNextServerClient(cookieStore, "admin");
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: params.email.trim(),
+      password: params.password,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    let userRole: "super_admin" | "staff" = "staff";
+    if (data.user) {
+      const res = await ensureAdminRole(data.user.id, params.email);
+      userRole = res.role;
+    }
+
+    // Instantly purge Next.js router cache and force live session recognition across layout
+    revalidatePath("/", "layout");
+
+    return {
+      success: true,
+      data: {
+        userId: data.user?.id,
+        role: userRole,
+      },
+    };
+  } catch (err: any) {
+    console.error("adminLoginAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred during login.",
+    };
+  }
+}
+
+/**
+ * Server Action: Register an initial or staff admin user and provision strict RBAC role
+ */
+export async function adminSignUpAction(params: {
+  email: string;
+  password: string;
+  fullName: string;
+}) {
+  try {
+    const cookieStore = await cookies();
+    const supabase = createNextServerClient(cookieStore, "admin");
+
+    const isSuperAdminEmail = params.email.trim().toLowerCase() === "phani9119@gmail.com";
+    const assignedRole = isSuperAdminEmail ? "super_admin" : "staff";
+
+    const { data, error } = await supabase.auth.signUp({
+      email: params.email.trim(),
+      password: params.password,
+      options: {
+        data: {
+          full_name: params.fullName.trim(),
+          role: "admin",
+        },
+      },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (data.user) {
+      await ensureAdminRole(data.user.id, params.email);
+    }
+
+    // Instantly purge Next.js router cache
+    revalidatePath("/", "layout");
+
+    return {
+      success: true,
+      data: {
+        hasSession: !!data.session,
+        userId: data.user?.id,
+        role: assignedRole,
+      },
+    };
+  } catch (err: any) {
+    console.error("adminSignUpAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred during registration.",
+    };
+  }
+}
+
+/**
+ * Server Action: Sign out the admin and immediately invalidate router cache
+ */
+export async function adminSignOutAction() {
+  try {
+    const cookieStore = await cookies();
+    const supabase = createNextServerClient(cookieStore, "admin");
+    await supabase.auth.signOut();
+
+    // Instantly purge Next.js router cache
+    revalidatePath("/", "layout");
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("adminSignOutAction error:", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to sign out.",
+    };
+  }
 }
 
 /**

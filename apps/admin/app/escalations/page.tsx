@@ -11,8 +11,10 @@ import {
   forceAssignBookingAdmin,
   type Tables,
 } from "@repo/db";
+import { getAdminUserRoleAction } from "../actions";
 import {
   AlertTriangle,
+  AlertCircle,
   Clock,
   ShieldAlert,
   Users,
@@ -33,6 +35,7 @@ export default function SlaEscalationDashboard() {
   const supabase = createBrowserSupabaseClient("admin");
 
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [escalatedBookings, setEscalatedBookings] = useState<any[]>([]);
   const [professionals, setProfessionals] = useState<any[]>([]);
   const [selectedProForBooking, setSelectedProForBooking] = useState<{ [bookingId: string]: string }>({});
@@ -42,6 +45,13 @@ export default function SlaEscalationDashboard() {
   async function loadData() {
     setLoading(true);
     try {
+      const roleRes = await getAdminUserRoleAction();
+      if (roleRes.role !== "super_admin") {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
       const [bookings, pros] = await Promise.all([
         fetchSlaEscalatedBookings(10, supabase),
         fetchAllProfessionalsAdmin(supabase),
@@ -108,6 +118,28 @@ export default function SlaEscalationDashboard() {
 
   const breachedCount = escalatedBookings.filter((b) => b.isBreached).length;
   const searchingCount = escalatedBookings.length;
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+        <div className="max-w-md w-full rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center space-y-4 shadow-2xl">
+          <AlertCircle className="h-12 w-12 text-rose-500 mx-auto" />
+          <h2 className="text-xl font-bold text-white">Access Denied</h2>
+          <p className="text-xs text-slate-400">
+            SLA dispatch controls and force-assignment overrides are reserved strictly for <strong>Super Admins</strong>. Staff members do not have clearance.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-900"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Return to Dashboard</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">

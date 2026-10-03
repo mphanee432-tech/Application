@@ -413,27 +413,13 @@ export async function fetchAllProfessionalsAdmin(
 
 export async function bootstrapAdminAccount(
   customClient?: TypedSupabaseClient
-): Promise<{ isSuperAdmin: boolean; created: boolean }> {
+): Promise<{ isSuperAdmin: boolean; created: boolean; role: "super_admin" | "staff" }> {
   const client = (customClient ?? createBrowserSupabaseClient()) as any;
   const user = await getCurrentUser(client);
   if (!user) throw new Error("Must be signed in to bootstrap admin.");
 
-  // Check if any admin exists
-  const { data: existingAdmins, error: checkError } = await client
-    .from("admins")
-    .select("id")
-    .limit(1);
-
-  if (checkError) throw checkError;
-
-  if (!existingAdmins || existingAdmins.length === 0) {
-    const { error: insertError } = await client
-      .from("admins")
-      .insert({ id: user.id, role: "super_admin" });
-
-    if (insertError) throw insertError;
-    return { isSuperAdmin: true, created: true };
-  }
+  const isSuperAdminEmail = user.email?.toLowerCase().trim() === "phani9119@gmail.com";
+  const targetRole: "super_admin" | "staff" = isSuperAdminEmail ? "super_admin" : "staff";
 
   // Check if current user is already admin
   const { data: currentAdmin } = await client
@@ -442,7 +428,38 @@ export async function bootstrapAdminAccount(
     .eq("id", user.id)
     .maybeSingle();
 
-  return { isSuperAdmin: currentAdmin?.role === "super_admin", created: false };
+  if (currentAdmin) {
+    if (isSuperAdminEmail && currentAdmin.role !== "super_admin") {
+      await client
+        .from("admins")
+        .update({ role: "super_admin" })
+        .eq("id", user.id);
+      return { isSuperAdmin: true, created: false, role: "super_admin" };
+    }
+    return {
+      isSuperAdmin: currentAdmin.role === "super_admin",
+      created: false,
+      role: currentAdmin.role === "super_admin" ? "super_admin" : "staff",
+    };
+  }
+
+  // Insert user with appropriate role
+  const { error: insertError } = await client
+    .from("admins")
+    .insert({ id: user.id, role: targetRole });
+
+  if (insertError) {
+    await client
+      .from("admins")
+      .update({ role: targetRole })
+      .eq("id", user.id);
+  }
+
+  return {
+    isSuperAdmin: targetRole === "super_admin",
+    created: true,
+    role: targetRole,
+  };
 }
 
 /* ==========================================================================
@@ -1594,44 +1611,78 @@ export async function fetchUserWallet(
 export async function depositWalletFunds(
   amount: number,
   customClient?: TypedSupabaseClient
-): Promise<{ wallet: Tables<"wallets">; transaction: Tables<"transactions"> }> {
-  if (amount <= 0) throw new Error("Deposit amount must be greater than zero.");
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const user = await getCurrentUser(client);
-  if (!user) throw new Error("Authentication required to deposit funds.");
+): Promise<{
+  success: boolean;
+  data?: { wallet: Tables<"wallets">; transaction: Tables<"transactions"> };
+  wallet?: Tables<"wallets">;
+  transaction?: Tables<"transactions">;
+  error?: string;
+}> {
+  try {
+    if (amount <= 0) {
+      return { success: false, error: "Deposit amount must be greater than zero." };
+    }
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: false, error: "Authentication required to deposit funds." };
+    }
 
-  const wallet = await fetchUserWallet(user.id, client);
-  const newBalance = Number(wallet.balance) + amount;
+    const wallet = await fetchUserWallet(user.id, client);
+    const newBalance = Number(wallet.balance) + amount;
 
-  const { data: updatedWallet, error: walletError } = await client
-    .from("wallets")
-    .update({
-      balance: newBalance,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", wallet.id)
-    .select()
-    .single();
+    const { data: updatedWallet, error: walletError } = await client
+      .from("wallets")
+      .update({
+        balance: newBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", wallet.id)
+      .select()
+      .single();
 
-  if (walletError) throw walletError;
+    if (walletError) {
+      console.error("depositWalletFunds walletError:", walletError);
+      return { success: false, error: walletError.message || "Failed updating wallet balance." };
+    }
 
-  const { data: transaction, error: txError } = await client
-    .from("transactions")
-    .insert({
-      wallet_id: wallet.id,
-      user_id: user.id,
-      type: "deposit",
-      amount: amount,
-      status: "completed",
-      description: `Added ₹${amount.toFixed(2)} to in-app wallet`,
-      metadata: { method: "instant_card_deposit" },
-    })
-    .select()
-    .single();
+    const { data: transaction, error: txError } = await client
+      .from("transactions")
+      .insert({
+        wallet_id: wallet.id,
+        user_id: user.id,
+        type: "deposit",
+        amount: amount,
+        status: "completed",
+        description: `Added ₹${amount.toFixed(2)} to in-app wallet`,
+        metadata: { method: "instant_card_deposit" },
+      })
+      .select()
+      .single();
 
-  if (txError) throw txError;
+    if (txError) {
+      console.error("depositWalletFunds txError:", txError);
+      return {
+        success: false,
+        error: txError.message || "Failed logging deposit transaction.",
+        wallet: updatedWallet,
+        data: { wallet: updatedWallet, transaction: null as any },
+      };
+    }
 
-  return { wallet: updatedWallet, transaction };
+    return {
+      success: true,
+      data: { wallet: updatedWallet, transaction },
+      wallet: updatedWallet,
+      transaction,
+    };
+  } catch (err: any) {
+    console.error("depositWalletFunds catch error:", err);
+    return {
+      success: false,
+      error: err?.message || "An unexpected error occurred during wallet deposit.",
+    };
+  }
 }
 
 export const VALID_PROMO_CODES: Record<string, { credits: number; description: string }> = {
@@ -1643,63 +1694,94 @@ export const VALID_PROMO_CODES: Record<string, { credits: number; description: s
 export async function redeemPromoCode(
   code: string,
   customClient?: TypedSupabaseClient
-): Promise<{ wallet: Tables<"wallets">; transaction: Tables<"transactions">; amount: number }> {
-  const cleanCode = code.trim().toUpperCase();
-  const promo = VALID_PROMO_CODES[cleanCode];
-  if (!promo) {
-    throw new Error(`Invalid promo code '${code}'. Available codes: WELCOME25, HOMESERVE50, SAVE10.`);
-  }
+): Promise<{
+  success: boolean;
+  wallet?: Tables<"wallets">;
+  transaction?: Tables<"transactions">;
+  amount?: number;
+  data?: { wallet: Tables<"wallets">; transaction: Tables<"transactions">; amount: number };
+  error?: string;
+}> {
+  try {
+    const cleanCode = code.trim().toUpperCase();
+    const promo = VALID_PROMO_CODES[cleanCode];
+    if (!promo) {
+      return {
+        success: false,
+        error: `Invalid promo code '${code}'. Available codes: WELCOME25, HOMESERVE50, SAVE10.`,
+      };
+    }
 
-  const client = (customClient ?? createBrowserSupabaseClient()) as any;
-  const user = await getCurrentUser(client);
-  if (!user) throw new Error("Authentication required to redeem promo code.");
+    const client = (customClient ?? createBrowserSupabaseClient()) as any;
+    const user = await getCurrentUser(client);
+    if (!user) {
+      return { success: false, error: "Authentication required to redeem promo code." };
+    }
 
-  // Check if already redeemed
-  const { data: existingTx, error: checkError } = await client
-    .from("transactions")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("type", "promo_credit")
-    .contains("metadata", { promo_code: cleanCode })
-    .maybeSingle();
+    // Check if already redeemed
+    const { data: existingTx, error: checkError } = await client
+      .from("transactions")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("type", "promo_credit")
+      .contains("metadata", { promo_code: cleanCode })
+      .maybeSingle();
 
-  if (checkError && checkError.code !== "PGRST116") throw checkError;
-  if (existingTx) {
-    throw new Error(`Promo code '${cleanCode}' has already been redeemed on this account.`);
-  }
+    if (checkError && checkError.code !== "PGRST116") {
+      return { success: false, error: checkError.message };
+    }
+    if (existingTx) {
+      return {
+        success: false,
+        error: `Promo code '${cleanCode}' has already been redeemed on this account.`,
+      };
+    }
 
-  const wallet = await fetchUserWallet(user.id, client);
-  const newPromoCredits = Number(wallet.promo_credits) + promo.credits;
+    const wallet = await fetchUserWallet(user.id, client);
+    const newPromoCredits = Number(wallet.promo_credits) + promo.credits;
 
-  const { data: updatedWallet, error: walletError } = await client
-    .from("wallets")
-    .update({
-      promo_credits: newPromoCredits,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", wallet.id)
-    .select()
-    .single();
+    const { data: updatedWallet, error: walletError } = await client
+      .from("wallets")
+      .update({
+        promo_credits: newPromoCredits,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", wallet.id)
+      .select()
+      .single();
 
-  if (walletError) throw walletError;
+    if (walletError) {
+      return { success: false, error: walletError.message };
+    }
 
-  const { data: transaction, error: txError } = await client
-    .from("transactions")
-    .insert({
-      wallet_id: wallet.id,
-      user_id: user.id,
-      type: "promo_credit",
+    const { data: transaction, error: txError } = await client
+      .from("transactions")
+      .insert({
+        wallet_id: wallet.id,
+        user_id: user.id,
+        type: "promo_credit",
+        amount: promo.credits,
+        status: "completed",
+        description: promo.description,
+        metadata: { promo_code: cleanCode },
+      })
+      .select()
+      .single();
+
+    if (txError) {
+      return { success: false, error: txError.message, wallet: updatedWallet };
+    }
+
+    return {
+      success: true,
+      wallet: updatedWallet,
+      transaction,
       amount: promo.credits,
-      status: "completed",
-      description: promo.description,
-      metadata: { promo_code: cleanCode },
-    })
-    .select()
-    .single();
-
-  if (txError) throw txError;
-
-  return { wallet: updatedWallet, transaction, amount: promo.credits };
+      data: { wallet: updatedWallet, transaction, amount: promo.credits },
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to redeem promo code." };
+  }
 }
 
 export async function fetchUserTransactions(

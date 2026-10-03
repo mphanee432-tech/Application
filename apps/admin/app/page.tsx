@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,7 +16,11 @@ import {
   getActiveSosCountAdmin,
   type Tables,
 } from "@repo/db";
-import { approveProfessionalKyc } from "./actions";
+import {
+  approveProfessionalKyc,
+  adminSignOutAction,
+  getAdminUserRoleAction,
+} from "./actions";
 import { ProofOfWorkAuditModal } from "../components/ProofOfWorkAuditModal";
 import { BookingDetailModal } from "../components/BookingDetailModal";
 import { CatalogManager } from "../components/CatalogManager";
@@ -53,6 +59,7 @@ export default function AdminPortal() {
   const supabase = createBrowserSupabaseClient("admin");
 
   const [user, setUser] = useState<any>(null);
+  const [userRole, setUserRole] = useState<"super_admin" | "staff">("staff");
   const [bookings, setBookings] = useState<any[]>([]);
   const [professionals, setProfessionals] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -76,14 +83,24 @@ export default function AdminPortal() {
   async function loadData() {
     setLoading(true);
     try {
-      const currentUser = await getCurrentUser();
+      const [currentUser, roleData] = await Promise.all([
+        getCurrentUser(),
+        getAdminUserRoleAction(),
+      ]);
       setUser(currentUser);
+      const isSuperAdmin = roleData?.role === "super_admin";
+      if (roleData?.success) {
+        setUserRole(roleData.role);
+        if (!isSuperAdmin) {
+          setActiveTab("kyc");
+        }
+      }
 
       const [allBookings, allPros, allReviews, supportCount, sosCount] = await Promise.all([
-        fetchAllBookingsAdmin(),
+        isSuperAdmin ? fetchAllBookingsAdmin() : Promise.resolve([]),
         fetchAllProfessionalsAdmin(),
-        fetchAllReviewsAdmin(supabase),
-        getUnreadSupportCount(currentUser?.id, "admin", supabase),
+        isSuperAdmin ? fetchAllReviewsAdmin(supabase) : Promise.resolve([]),
+        isSuperAdmin ? getUnreadSupportCount(currentUser?.id, "admin", supabase) : Promise.resolve(0),
         getActiveSosCountAdmin(supabase),
       ]);
 
@@ -180,11 +197,13 @@ export default function AdminPortal() {
   }
 
   async function handleSignOut() {
+    await adminSignOutAction();
     await supabase.auth.signOut();
     setUser(null);
     setBookings([]);
     setProfessionals([]);
     setReviews([]);
+    router.refresh();
   }
 
   // Calculated Real Database Metrics
@@ -263,7 +282,13 @@ export default function AdminPortal() {
                   <p className="text-xs font-bold text-slate-200">
                     {user.user_metadata?.full_name || user.email?.split("@")[0]}
                   </p>
-                  <p className="text-[10px] text-indigo-400 font-semibold">Role: Super Admin</p>
+                  <p
+                    className={`text-[10px] font-semibold ${
+                      userRole === "super_admin" ? "text-indigo-400" : "text-amber-400"
+                    }`}
+                  >
+                    Role: {userRole === "super_admin" ? "Super Admin" : "Staff"}
+                  </p>
                 </div>
                 <button
                   onClick={handleSignOut}
@@ -317,14 +342,27 @@ export default function AdminPortal() {
 
         {/* Live Metrics Computed from Database */}
         <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">Total Bookings Volume</span>
-              <DollarSign className="h-4 w-4 text-emerald-400" />
+          {userRole === "super_admin" ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Total Bookings Volume</span>
+                <DollarSign className="h-4 w-4 text-emerald-400" />
+              </div>
+              <p className="mt-2 text-2xl font-black text-white">₹{totalVolume.toFixed(2)}</p>
+              <p className="mt-1 text-[11px] text-slate-400">{bookings.length} total platform orders</p>
             </div>
-            <p className="mt-2 text-2xl font-black text-white">₹{totalVolume.toFixed(2)}</p>
-            <p className="mt-1 text-[11px] text-slate-400">{bookings.length} total platform orders</p>
-          </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Pending KYC Pipeline</span>
+                <ShieldCheck className="h-4 w-4 text-indigo-400" />
+              </div>
+              <p className="mt-2 text-2xl font-black text-indigo-400">
+                {professionals.filter((p) => p.status === "pending" || p.kyc_status === "pending").length}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-400">Providers awaiting document verification</p>
+            </div>
+          )}
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="flex items-center justify-between">
@@ -359,16 +397,18 @@ export default function AdminPortal() {
 
         {/* Tab Controls */}
         <div className="flex border-b border-slate-800 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab("bookings")}
-            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
-              activeTab === "bookings"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>Live Bookings & Dispatch ({bookings.length})</span>
-          </button>
+          {userRole === "super_admin" && (
+            <button
+              onClick={() => setActiveTab("bookings")}
+              className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
+                activeTab === "bookings"
+                  ? "border-indigo-500 text-white"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <span>Live Bookings & Dispatch ({bookings.length})</span>
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("kyc")}
             className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
@@ -379,64 +419,68 @@ export default function AdminPortal() {
           >
             <span>KYC Review Pipeline ({professionals.length})</span>
           </button>
-          <button
-            onClick={() => setActiveTab("reviews")}
-            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
-              activeTab === "reviews"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>Centralized Reviews ({reviews.length})</span>
-            {disputeCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white animate-pulse">
-                {disputeCount} Dispute{disputeCount > 1 ? "s" : ""}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("catalog")}
-            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
-              activeTab === "catalog"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>Catalog & City Pricing</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("directories")}
-            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
-              activeTab === "directories"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>Directories</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("support")}
-            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
-              activeTab === "support"
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>Support Hub</span>
-            {unreadSupportCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white shadow-sm animate-pulse">
-                {unreadSupportCount > 99 ? "99+" : unreadSupportCount}
-              </span>
-            )}
-          </button>
+          {userRole === "super_admin" && (
+            <>
+              <button
+                onClick={() => setActiveTab("reviews")}
+                className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
+                  activeTab === "reviews"
+                    ? "border-indigo-500 text-white"
+                    : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Centralized Reviews ({reviews.length})</span>
+                {disputeCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white animate-pulse">
+                    {disputeCount} Dispute{disputeCount > 1 ? "s" : ""}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab("catalog")}
+                className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
+                  activeTab === "catalog"
+                    ? "border-indigo-500 text-white"
+                    : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Catalog & City Pricing</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("directories")}
+                className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
+                  activeTab === "directories"
+                    ? "border-indigo-500 text-white"
+                    : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Directories</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("support")}
+                className={`flex items-center gap-2 border-b-2 px-5 py-3 text-xs font-bold transition shrink-0 ${
+                  activeTab === "support"
+                    ? "border-indigo-500 text-white"
+                    : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Support Hub</span>
+                {unreadSupportCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white shadow-sm animate-pulse">
+                    {unreadSupportCount > 99 ? "99+" : unreadSupportCount}
+                  </span>
+                )}
+              </button>
 
-          <Link
-            href="/finance"
-            className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-slate-400 hover:text-indigo-400 transition shrink-0"
-          >
-            <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Financials & Ledger</span>
-          </Link>
+              <Link
+                href="/finance"
+                className="flex items-center gap-1.5 border-b-2 border-transparent px-5 py-3 text-xs font-bold text-slate-400 hover:text-indigo-400 transition shrink-0"
+              >
+                <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Financials & Ledger</span>
+              </Link>
+            </>
+          )}
 
           <Link
             href="/sos"
@@ -469,7 +513,7 @@ export default function AdminPortal() {
         </div>
 
         {/* Tab 1: Live Bookings Dispatch Snapshot */}
-        {activeTab === "bookings" && (
+        {userRole === "super_admin" && activeTab === "bookings" && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
               <div>
@@ -717,7 +761,7 @@ export default function AdminPortal() {
         )}
 
         {/* Tab 3: Centralized Reviews & Dispute Highlighting */}
-        {activeTab === "reviews" && (
+        {userRole === "super_admin" && activeTab === "reviews" && (
           <div className="space-y-6">
             {/* Reviews Header Banner & Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -951,13 +995,30 @@ export default function AdminPortal() {
         )}
 
         {/* Tab 4: Service & City Catalog Manager */}
-        {activeTab === "catalog" && <CatalogManager />}
+        {userRole === "super_admin" && activeTab === "catalog" && <CatalogManager />}
 
         {/* Tab 5: User & Professional Directories */}
-        {activeTab === "directories" && <DirectoriesView />}
+        {userRole === "super_admin" && activeTab === "directories" && <DirectoriesView />}
 
         {/* Tab 6: Centralized Support Hub */}
-        {activeTab === "support" && <SupportHub />}
+        {userRole === "super_admin" && activeTab === "support" && <SupportHub />}
+
+        {/* Staff restricted notice fallback */}
+        {userRole === "staff" && activeTab !== "kyc" && (
+          <div className="rounded-2xl border border-amber-900/60 bg-amber-950/20 p-8 text-center space-y-3">
+            <AlertCircle className="h-8 w-8 text-amber-400 mx-auto" />
+            <h3 className="text-base font-bold text-white">Staff Clearance Required</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              Your account currently holds the limited <strong>Staff</strong> role. You have access to KYC Verifications, Campaigns, SOS Hub, and the AI Copilot. Higher platform administrative clearance is required for this module.
+            </p>
+            <button
+              onClick={() => setActiveTab("kyc")}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 transition"
+            >
+              Go to KYC Verification Pipeline
+            </button>
+          </div>
+        )}
       </main>
 
       {/* Proof of Work Side-by-Side Audit Modal */}

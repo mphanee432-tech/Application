@@ -9,7 +9,7 @@ import {
   fetchPlatformFinanceLedger,
   type Tables,
 } from "@repo/db";
-import { approvePayoutAdminAction } from "../actions";
+import { approvePayoutAdminAction, getAdminUserRoleAction } from "../actions";
 import {
   TrendingUp,
   Clock,
@@ -52,6 +52,7 @@ export default function AdminFinancePage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const loadFinanceData = async () => {
     try {
@@ -70,9 +71,19 @@ export default function AdminFinancePage() {
     async function init() {
       try {
         setLoading(true);
-        const currentUser = await getCurrentUser(supabase);
+        const [currentUser, roleData] = await Promise.all([
+          getCurrentUser(supabase),
+          getAdminUserRoleAction(),
+        ]);
         if (!currentUser) {
           router.push("/login?redirect=/finance");
+          return;
+        }
+        if (roleData?.role !== "super_admin") {
+          if (isMounted) {
+            setAccessDenied(true);
+            setLoading(false);
+          }
           return;
         }
         if (!isMounted) return;
@@ -145,6 +156,29 @@ export default function AdminFinancePage() {
     }
     return true;
   });
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+        <div className="max-w-md w-full rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center space-y-4 shadow-2xl">
+          <AlertCircle className="h-12 w-12 text-rose-500 mx-auto" />
+          <h2 className="text-xl font-bold text-white">Access Denied</h2>
+          <p className="text-xs text-slate-400">
+            This module contains confidential financial ledgers and payout controls reserved strictly for <strong>Super Admins</strong>. Staff members do not have clearance.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-900"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Return to Dashboard</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

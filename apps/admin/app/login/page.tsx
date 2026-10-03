@@ -1,9 +1,10 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createBrowserSupabaseClient } from "@repo/db";
-import { ensureSuperAdminRole } from "../actions";
+import { adminLoginAction, adminSignUpAction } from "../actions";
 import { ShieldCheck, LogIn, UserPlus, ArrowLeft, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
@@ -16,8 +17,6 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const supabase = createBrowserSupabaseClient("admin");
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -25,40 +24,32 @@ export default function AdminLoginPage() {
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
+        const res = await adminSignUpAction({
           email,
           password,
-          options: {
-            data: {
-              full_name: fullName,
-              role: "admin",
-            },
-          },
+          fullName,
         });
 
-        if (error) throw error;
-
-        if (data.user) {
-          // Trigger server action to grant super_admin if this is the initial account
-          await ensureSuperAdminRole(data.user.id);
+        if (!res.success) {
+          setErrorMessage(res.error || "Failed to initialize admin account.");
+          return;
         }
 
-        if (data.session) {
+        if (res.data?.hasSession) {
           router.push("/");
           router.refresh();
         } else {
           setErrorMessage("Admin account initialized. Please sign in or confirm your email.");
         }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const res = await adminLoginAction({
           email,
           password,
         });
 
-        if (error) throw error;
-
-        if (data.user) {
-          await ensureSuperAdminRole(data.user.id);
+        if (!res.success) {
+          setErrorMessage(res.error || "Failed to sign in.");
+          return;
         }
 
         router.push("/");
@@ -86,12 +77,12 @@ export default function AdminLoginPage() {
             HQ
           </div>
           <h2 className="mt-4 text-2xl font-black tracking-tight text-white">
-            {isSignUp ? "Initialize Admin Access" : "Ops HQ Admin Sign In"}
+            {isSignUp ? "Register Admin Account" : "Ops HQ Admin Sign In"}
           </h2>
           <p className="mt-1 text-xs text-slate-400">
             {isSignUp
-              ? "Initial registered account is automatically provisioned as super_admin"
-              : "Authentication required for live dispatch, KYC verification, and escrow oversight"}
+              ? "New accounts receive Staff privileges. Global super_admin access is strictly restricted."
+              : "Authentication required for operations oversight, KYC verification, and platform management"}
           </p>
         </div>
 

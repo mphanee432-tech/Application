@@ -135,9 +135,13 @@ export default function UserWalletPage() {
       setDepositSuccess(null);
 
       const res = await depositWalletFunds(amountNum, supabase);
-      setWallet(res.wallet);
-      setDepositSuccess(`Successfully added ₹${amountNum.toFixed(2)} to your wallet!`);
-      if (user) await loadWalletData(user.id);
+      if (res.success && res.wallet) {
+        setWallet(res.wallet);
+        setDepositSuccess(`Successfully added ₹${amountNum.toFixed(2)} to your wallet!`);
+        if (user) await loadWalletData(user.id);
+      } else {
+        setDepositError(res.error || "Failed to process deposit");
+      }
     } catch (err: any) {
       setDepositError(err.message || "Failed to process deposit");
     } finally {
@@ -155,10 +159,14 @@ export default function UserWalletPage() {
       setPromoSuccess(null);
 
       const res = await redeemPromoCode(promoCode.trim(), supabase);
-      setWallet(res.wallet);
-      setPromoSuccess(`🎉 Success! +₹${res.amount.toFixed(2)} bonus credits added to your wallet.`);
-      setPromoCode("");
-      if (user) await loadWalletData(user.id);
+      if (res.success && res.wallet) {
+        setWallet(res.wallet);
+        setPromoSuccess(`🎉 Success! +₹${(res.amount || 0).toFixed(2)} bonus credits added to your wallet.`);
+        setPromoCode("");
+        if (user) await loadWalletData(user.id);
+      } else {
+        setPromoError(res.error || "Failed to redeem code");
+      }
     } catch (err: any) {
       setPromoError(err.message || "Failed to redeem code");
     } finally {
